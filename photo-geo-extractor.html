@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>사진 위치·시간 추출기</title>
+<style>
+:root{
+  --bg:#fbfbfa; --panel:#fff; --ink:#1a1a19; --dim:#6b6b66; --line:#e4e4e0;
+  --accent:#2f6f4e; --accent-soft:#e8f2ec; --warn:#8a5a00; --err:#a03530;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#16171a; --panel:#1e2024; --ink:#e9e9e6; --dim:#95958e; --line:#2e3137;
+  --accent:#6fbf95; --accent-soft:#1e2f27; --warn:#d6a44a; --err:#e07a72;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;}
+.wrap{max-width:940px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:22px;margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:var(--dim);font-size:14px;margin:0 0 26px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);margin:0 0 14px;font-weight:600}
+button{font:inherit;font-weight:550;padding:9px 16px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);cursor:pointer}
+button:hover:not(:disabled){border-color:var(--dim)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+@media (prefers-color-scheme:dark){button.primary{color:#10241a}}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.pathchip{font:12px/1.4 var(--mono);background:var(--accent-soft);color:var(--accent);
+  padding:5px 10px;border-radius:6px;word-break:break-all}
+label.opt{display:flex;gap:7px;align-items:center;font-size:13.5px;color:var(--dim);cursor:pointer}
+input[type=range]{width:130px;accent-color:var(--accent)}
+input[type=text]{font:13px var(--mono);padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);color:var(--ink);width:100%}
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:14px 0 10px}
+.bar>i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s ease}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:2px 16px}
+.stat b{display:block;font:600 19px/1.3 var(--mono);letter-spacing:-.02em}
+.stat span{font-size:11.5px;color:var(--dim)}
+.stat.warn b{color:var(--warn)} .stat.err b{color:var(--err)} .stat.good b{color:var(--accent)}
+pre.log{font:11.5px/1.6 var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:8px;
+  padding:10px 12px;max-height:190px;overflow:auto;margin:12px 0 0;white-space:pre-wrap;color:var(--dim)}
+table{width:100%;border-collapse:collapse;font:12px/1.5 var(--mono);margin-top:4px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:230px}
+th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.note{font-size:13px;color:var(--dim);margin-top:12px}
+.note code{font:12px var(--mono);background:var(--bg);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
+.hide{display:none}
+.banner{border-left:3px solid var(--warn);background:var(--panel);padding:10px 14px;border-radius:0 8px 8px 0;
+  font-size:13.5px;color:var(--dim);margin-bottom:16px}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>사진 위치·시간 추출기</h1>
+  <p class="sub">폴더 안의 모든 사진에서 <b>위도·경도·촬영일시</b>만 읽어 JSON으로 저장합니다.
+     이미지는 디코딩하지 않고 파일 앞부분 64KB만 읽으므로, 10만 장이어도 메모리는 일정하게 유지됩니다.
+     사진은 이 컴퓨터 밖으로 나가지 않습니다.
+     저장한 JSON은 <a href="./">사진 이동 경로 지도</a>에 끌어다 놓으면 이동 경로를 지도 영상으로 볼 수 있습니다.</p>
+
+  <div id="compat" class="banner hide"></div>
+
+  <div class="card">
+    <h2>1. 대상 폴더</h2>
+    <div class="row">
+      <button id="pick" class="primary">폴더 선택</button>
+      <button id="pickFallback" class="hide">폴더 선택 (호환 모드)</button>
+      <input id="fbInput" type="file" webkitdirectory multiple class="hide">
+      <span id="pickInfo" style="color:var(--dim);font-size:13.5px">하위 폴더까지 모두 훑습니다.</span>
+    </div>
+    <div id="pathChip" class="pathchip hide" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. 옵션</h2>
+    <div class="row" style="gap:22px">
+      <label class="opt">동시 처리 <input id="workers" type="range" min="1" max="16" value="6">
+        <b id="workersN" style="font:600 13px var(--mono);color:var(--ink)">6</b></label>
+      <label class="opt"><input id="wantModel" type="checkbox" checked> 카메라 모델 포함</label>
+    </div>
+    <div class="note" style="margin-top:10px">위도·경도가 없는 사진은 결과에서 <b>항상 제외</b>됩니다.
+      제외된 사진은 아래 <b>제외된 사진</b> 목록에서 확인할 수 있습니다.</div>
+    <div style="margin-top:14px">
+      <label class="opt" style="display:block;margin-bottom:6px">확장자</label>
+      <input id="exts" type="text" value="jpg,jpeg,jpe,png,heic,heif,avif,webp,tif,tiff,dng,cr2,cr3,nef,arw,rw2,orf,raf">
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. 실행</h2>
+    <div class="row">
+      <button id="run" class="primary" disabled>추출 시작</button>
+      <button id="stop" disabled>중지</button>
+      <span id="phase" style="color:var(--dim);font-size:13.5px"></span>
+    </div>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="stats">
+      <div class="stat"><b id="sScanned">0</b><span>발견</span></div>
+      <div class="stat"><b id="sDone">0</b><span>처리</span></div>
+      <div class="stat good"><b id="sGps">0</b><span>GPS 있음</span></div>
+      <div class="stat"><b id="sTime">0</b><span>시간만</span></div>
+      <div class="stat warn"><b id="sNone">0</b><span>메타 없음</span></div>
+      <div class="stat err"><b id="sErr">0</b><span>오류</span></div>
+      <div class="stat warn"><b id="sSkip">0</b><span>제외됨</span></div>
+      <div class="stat"><b id="sRate">–</b><span>장/초</span></div>
+      <div class="stat"><b id="sEta">–</b><span>남은 시간</span></div>
+      <div class="stat"><b id="sHeap">–</b><span>JS 메모리</span></div>
+      <div class="stat"><b id="sRead">0</b><span>읽은 용량</span></div>
+    </div>
+    <pre id="log" class="log hide"></pre>
+    <div class="row hide" id="dlRow" style="margin-top:14px">
+      <button id="dlJson" class="primary">JSON 내려받기</button>
+      <button id="dlErr">오류 목록 내려받기</button>
+    </div>
+    <div class="row hide" id="mapRow" style="margin-top:14px">
+      <a href="./" style="font-weight:550;font-size:13.5px">저장한 JSON을 지도에 그리기 →</a>
+    </div>
+  </div>
+
+  <div class="card hide" id="previewCard">
+    <h2>미리보기 (앞 20건)</h2>
+    <div style="overflow-x:auto"><table id="preview">
+      <thead><tr><th>path</th><th>lat</th><th>lon</th><th>taken</th><th>tz</th></tr></thead><tbody></tbody></table></div>
+    <div class="note">저장 형식: <code>[{"path","lat","lon","alt","taken","tz","takenUtc","gpsUtc","model","size"}, …]</code>
+      — 값이 없는 필드는 생략됩니다. <code>taken</code>은 카메라 로컬 시각, <code>gpsUtc</code>는 GPS가 기록한 UTC입니다.</div>
+  </div>
+
+  <div class="card hide" id="excludedCard">
+    <h2>제외된 사진 <span id="exCount" style="text-transform:none;letter-spacing:0"></span></h2>
+    <div style="overflow-x:auto"><table id="excluded">
+      <thead><tr><th>path</th><th>사유</th><th>촬영일시</th></tr></thead><tbody></tbody></table></div>
+    <div class="note" id="exNote"></div>
+    <div class="row" style="margin-top:12px"><button id="dlExcluded">제외 목록 내려받기</button></div>
+  </div>
+</div>
+
+<script type="text/js-worker" id="core">
+/* exifcore.js — dependency-free extractor for GPS + capture time only.
+ * Supports: JPEG, HEIC/HEIF/AVIF (ISOBMFF), PNG (eXIf), WebP (EXIF), TIFF/DNG.
+ * Never decodes pixels. Reads only the metadata bytes.
+ *
+ * Entry point: locateTiff(buffer)  -> {tiff:n} | {fetch:{offset,length}} | {need:n} | {none:reason}
+ *              readTags(buffer, tiffStart) -> record | {need:n}
+ */
+'use strict';
+
+var TYPE_SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 };
+
+/* ---------- bounds-checked view ---------- */
+function Buf(dv) { this.dv = dv; this.len = dv.byteLength; this.over = false; this.little = false; }
+Buf.prototype.fits = function (o, n) {
+  if (o < 0 || n < 0 || o + n > this.len) { this.over = true; return false; }
+  return true;
+};
+Buf.prototype.u8 = function (o) { return this.fits(o, 1) ? this.dv.getUint8(o) : 0; };
+Buf.prototype.u16 = function (o, le) { return this.fits(o, 2) ? this.dv.getUint16(o, le === undefined ? this.little : le) : 0; };
+Buf.prototype.u32 = function (o, le) { return this.fits(o, 4) ? this.dv.getUint32(o, le === undefined ? this.little : le) : 0; };
+Buf.prototype.i32 = function (o, le) { return this.fits(o, 4) ? this.dv.getInt32(o, le === undefined ? this.little : le) : 0; };
+Buf.prototype.str = function (o, n) {
+  if (!this.fits(o, n)) return '';
+  var s = '';
+  for (var i = 0; i < n; i++) { var c = this.dv.getUint8(o + i); if (c === 0) break; s += String.fromCharCode(c); }
+  return s;
+};
+Buf.prototype.tag4 = function (o) {
+  if (!this.fits(o, 4)) return '';
+  return String.fromCharCode(this.dv.getUint8(o), this.dv.getUint8(o + 1), this.dv.getUint8(o + 2), this.dv.getUint8(o + 3));
+};
+
+/* ---------- container scanners ---------- */
+// Each returns: {tiff}, {fetch}, {need}, or {none}
+
+function scanJpeg(b) {
+  var off = 2;
+  while (off + 4 <= b.len) {
+    if (b.dv.getUint8(off) !== 0xff) { off++; continue; }          // resync on padding
+    var m = b.dv.getUint8(off + 1);
+    if (m === 0xff) { off++; continue; }                            // fill byte
+    if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { off += 2; continue; }
+    if (m === 0xda || m === 0xd9) return { none: 'no-exif' };       // reached image data
+    var len = b.dv.getUint16(off + 2, false);
+    if (len < 2) return { none: 'bad-jpeg' };
+    if (m === 0xe1 && off + 10 <= b.len && b.tag4(off + 4) === 'Exif') return { tiff: off + 10 };
+    off += 2 + len;
+  }
+  return { need: Math.max(off + 16, b.len * 2) };
+}
+
+function scanPng(b) {
+  var off = 8;
+  while (off + 8 <= b.len) {
+    var clen = b.dv.getUint32(off, false);
+    var type = b.tag4(off + 4);
+    if (type === 'eXIf') {
+      var p = off + 8;
+      if (b.tag4(p) === 'Exif') p += 6;
+      return { tiff: p };
+    }
+    if (type === 'IDAT' || type === 'IEND') return { none: 'no-exif' };
+    if (clen > 0x7fffffff) return { none: 'bad-png' };
+    off += 12 + clen;
+  }
+  return { need: Math.max(off + 16, b.len * 2) };
+}
+
+function scanWebp(b) {
+  var off = 12;
+  while (off + 8 <= b.len) {
+    var type = b.tag4(off);
+    var clen = b.dv.getUint32(off + 4, true);
+    if (type === 'EXIF') {
+      var p = off + 8;
+      if (b.tag4(p) === 'Exif') p += 6;
+      return { tiff: p };
+    }
+    if (clen > 0x7fffffff) return { none: 'bad-webp' };
+    off += 8 + clen + (clen & 1);
+  }
+  return { need: Math.max(off + 16, b.len * 2) };
+}
+
+/* --- ISOBMFF (HEIC / HEIF / AVIF) --- */
+function eachBox(b, start, end, cb) {
+  var off = start;
+  while (off + 8 <= end) {
+    var size = b.dv.getUint32(off, false);
+    var type = b.tag4(off + 4);
+    var hdr = 8;
+    if (size === 1) {
+      if (!b.fits(off + 8, 8)) return;
+      size = b.dv.getUint32(off + 8, false) * 4294967296 + b.dv.getUint32(off + 12, false);
+      hdr = 16;
+    } else if (size === 0) {
+      size = end - off;
+    }
+    if (size < hdr || off + size > end) { b.over = true; return; }
+    if (cb(type, off + hdr, off + size) === false) return;
+    off += size;
+  }
+}
+
+function readN(b, off, n) {
+  if (n === 0) return 0;
+  if (n === 4) return b.u32(off, false);
+  if (n === 8) return b.u32(off, false) * 4294967296 + b.u32(off + 4, false);
+  if (n === 2) return b.u16(off, false);
+  return 0;
+}
+
+function scanIsobmff(b) {
+  var exifItemId = -1, meta = null;
+
+  eachBox(b, 0, b.len, function (type, s, e) {
+    if (type === 'meta') { meta = [s + 4, e]; return false; }   // meta is a FullBox
+  });
+  if (!meta) return b.over ? { need: b.len * 4 } : { none: 'no-meta' };
+
+  // iinf -> find the item whose type is 'Exif'
+  eachBox(b, meta[0], meta[1], function (type, s, e) {
+    if (type !== 'iinf') return;
+    var ver = b.u8(s);
+    var p = s + 4 + (ver === 0 ? 2 : 4);
+    eachBox(b, p, e, function (t2, s2) {
+      if (t2 !== 'infe') return;
+      var v2 = b.u8(s2);
+      var q = s2 + 4;
+      var id = v2 < 3 ? b.u16(q, false) : b.u32(q, false);
+      q += v2 < 3 ? 2 : 4;
+      q += 2;                                    // protection_index
+      if (v2 >= 2 && b.tag4(q) === 'Exif') { exifItemId = id; return false; }
+    });
+    return false;
+  });
+  if (exifItemId < 0) return b.over ? { need: b.len * 4 } : { none: 'no-exif' };
+
+  // iloc -> byte range of that item
+  var found = null;
+  eachBox(b, meta[0], meta[1], function (type, s) {
+    if (type !== 'iloc') return;
+    var ver = b.u8(s);
+    var p = s + 4;
+    var sz1 = b.u8(p), sz2 = b.u8(p + 1); p += 2;
+    var offSize = sz1 >> 4, lenSize = sz1 & 15, baseSize = sz2 >> 4, idxSize = (ver === 1 || ver === 2) ? (sz2 & 15) : 0;
+    var count;
+    if (ver < 2) { count = b.u16(p, false); p += 2; } else { count = b.u32(p, false); p += 4; }
+    for (var i = 0; i < count && !b.over; i++) {
+      var id;
+      if (ver < 2) { id = b.u16(p, false); p += 2; } else { id = b.u32(p, false); p += 4; }
+      var construction = 0;
+      if (ver === 1 || ver === 2) { construction = b.u16(p, false) & 15; p += 2; }
+      p += 2;                                                     // data_reference_index
+      var base = readN(b, p, baseSize); p += baseSize;
+      var extents = b.u16(p, false); p += 2;
+      for (var j = 0; j < extents; j++) {
+        p += idxSize;
+        var eo = readN(b, p, offSize); p += offSize;
+        var el = readN(b, p, lenSize); p += lenSize;
+        if (id === exifItemId && found === null && construction === 0) found = { offset: base + eo, length: el || 65536 };
+      }
+    }
+    return false;
+  });
+  if (!found) return b.over ? { need: b.len * 4 } : { none: 'no-exif' };
+
+  // Already inside the buffer we hold? then no extra read needed.
+  if (found.offset + 8 <= b.len) return { tiff: exifPayloadToTiff(b, found.offset) };
+  return { fetch: { offset: found.offset, length: Math.min(found.length + 8, 4 << 20) } };
+}
+
+// HEIF Exif item payload: u32 header-offset, then (usually) "Exif\0\0", then TIFF.
+function exifPayloadToTiff(b, off) {
+  var skip = b.u32(off, false);
+  if (skip > 1024) skip = 0;
+  var p = off + 4 + skip;
+  if (b.tag4(p) === 'Exif') p += 6;
+  return p;
+}
+
+/* ---------- format dispatch ---------- */
+function locateTiff(arrayBuffer) {
+  var b = new Buf(new DataView(arrayBuffer));
+  if (b.len < 16) return { none: 'too-small' };
+  var a = b.dv.getUint8(0), c = b.dv.getUint8(1);
+
+  if (a === 0xff && c === 0xd8) return scanJpeg(b);
+  if (a === 0x89 && c === 0x50 && b.dv.getUint8(2) === 0x4e && b.dv.getUint8(3) === 0x47) return scanPng(b);
+  if (b.tag4(0) === 'RIFF' && b.tag4(8) === 'WEBP') return scanWebp(b);
+  if ((a === 0x49 && c === 0x49) || (a === 0x4d && c === 0x4d)) return { tiff: 0 };   // TIFF / DNG / CR2
+  if (b.tag4(4) === 'ftyp') return scanIsobmff(b);
+  return { none: 'unsupported' };
+}
+
+/* ---------- TIFF / IFD ---------- */
+var T = {
+  DATETIME: 0x0132, EXIF_IFD: 0x8769, GPS_IFD: 0x8825,
+  DT_ORIG: 0x9003, DT_DIGI: 0x9004, OFFSET_ORIG: 0x9011, OFFSET: 0x9010, SUBSEC: 0x9291,
+  MAKE: 0x010f, MODEL: 0x0110
+};
+var G = { LAT_REF: 1, LAT: 2, LON_REF: 3, LON: 4, ALT_REF: 5, ALT: 6, TIME: 7, DATE: 0x001d };
+
+function readValue(b, type, count, off) {
+  var size = TYPE_SIZE[type];
+  if (!size || count > 100000) return null;
+  if (type === 2) return b.str(off, count);
+  var out = [];
+  for (var i = 0; i < count; i++) {
+    var p = off + i * size;
+    switch (type) {
+      case 1: case 7: out.push(b.u8(p)); break;
+      case 3: out.push(b.u16(p)); break;
+      case 4: out.push(b.u32(p)); break;
+      case 9: out.push(b.i32(p)); break;
+      case 5: { var n = b.u32(p), d = b.u32(p + 4); out.push(d ? n / d : 0); break; }
+      case 10: { var n2 = b.i32(p), d2 = b.i32(p + 4); out.push(d2 ? n2 / d2 : 0); break; }
+      default: return null;
+    }
+  }
+  return count === 1 && type !== 2 ? out[0] : out;
+}
+
+function readIFD(b, tiff, ifdOff, want, out) {
+  if (ifdOff <= 0) return;
+  var base = tiff + ifdOff;
+  var n = b.u16(base);
+  if (b.over || n === 0 || n > 512) return;
+  for (var i = 0; i < n; i++) {
+    var e = base + 2 + i * 12;
+    var tag = b.u16(e);
+    if (!want[tag]) continue;
+    var type = b.u16(e + 2), count = b.u32(e + 4);
+    var size = TYPE_SIZE[type];
+    if (!size) continue;
+    var bytes = size * count;
+    var voff = bytes <= 4 ? e + 8 : tiff + b.u32(e + 8);
+    var v = readValue(b, type, count, voff);
+    if (v !== null && v !== '') out[tag] = v;
+  }
+}
+
+var WANT_IFD0 = {}; WANT_IFD0[T.DATETIME] = 1; WANT_IFD0[T.EXIF_IFD] = 1; WANT_IFD0[T.GPS_IFD] = 1;
+WANT_IFD0[T.MAKE] = 1; WANT_IFD0[T.MODEL] = 1;
+var WANT_EXIF = {}; WANT_EXIF[T.DT_ORIG] = 1; WANT_EXIF[T.DT_DIGI] = 1;
+WANT_EXIF[T.OFFSET_ORIG] = 1; WANT_EXIF[T.OFFSET] = 1; WANT_EXIF[T.SUBSEC] = 1;
+var WANT_GPS = {}; [G.LAT_REF, G.LAT, G.LON_REF, G.LON, G.ALT_REF, G.ALT, G.TIME, G.DATE].forEach(function (k) { WANT_GPS[k] = 1; });
+
+function dms(v, ref) {
+  if (v == null) return null;
+  var a = Array.isArray(v) ? v : [v, 0, 0];
+  var d = (a[0] || 0) + (a[1] || 0) / 60 + (a[2] || 0) / 3600;
+  if (!isFinite(d)) return null;
+  if (ref === 'S' || ref === 'W') d = -d;
+  return Math.round(d * 1e7) / 1e7;
+}
+
+function normDate(s) {                       // "2023:05:14 09:23:41" -> "2023-05-14T09:23:41"
+  if (typeof s !== 'string') return null;
+  var m = s.trim().match(/^(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return null;
+  if (m[1] === '0000') return null;
+  return m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6];
+}
+
+function readTags(arrayBuffer, tiffStart) {
+  var b = new Buf(new DataView(arrayBuffer));
+  var bo = b.u16(tiffStart, false);
+  if (bo !== 0x4949 && bo !== 0x4d4d) return { bad: 'not-tiff' };
+  b.little = bo === 0x4949;
+  if (b.u16(tiffStart + 2) !== 42) return { bad: 'not-tiff' };
+  var ifd0 = b.u32(tiffStart + 4);
+  if (b.over) return { need: arrayBuffer.byteLength * 4 };
+
+  var m0 = {}; readIFD(b, tiffStart, ifd0, WANT_IFD0, m0);
+  var me = {}; if (m0[T.EXIF_IFD]) readIFD(b, tiffStart, m0[T.EXIF_IFD], WANT_EXIF, me);
+  var mg = {}; if (m0[T.GPS_IFD]) readIFD(b, tiffStart, m0[T.GPS_IFD], WANT_GPS, mg);
+
+  var r = {};
+  var lat = dms(mg[G.LAT], mg[G.LAT_REF]);
+  var lon = dms(mg[G.LON], mg[G.LON_REF]);
+  if (lat !== null && lon !== null && !(lat === 0 && lon === 0) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+    r.lat = lat; r.lon = lon;
+    if (typeof mg[G.ALT] === 'number' && isFinite(mg[G.ALT])) {
+      r.alt = Math.round((mg[G.ALT_REF] === 1 ? -mg[G.ALT] : mg[G.ALT]) * 100) / 100;
+    }
+  }
+
+  var taken = normDate(me[T.DT_ORIG]) || normDate(me[T.DT_DIGI]) || normDate(m0[T.DATETIME]);
+  if (taken) {
+    r.taken = taken;
+    var off = me[T.OFFSET_ORIG] || me[T.OFFSET];
+    if (typeof off === 'string' && /^[+\-]\d{2}:\d{2}$/.test(off.trim())) r.tz = off.trim();
+  }
+
+  // GPS timestamp is always UTC — the only trustworthy absolute time
+  if (typeof mg[G.DATE] === 'string' && Array.isArray(mg[G.TIME])) {
+    var d = mg[G.DATE].trim().replace(/:/g, '-').slice(0, 10);
+    var t = mg[G.TIME];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d.slice(0, 4) !== '0000') {
+      var pad = function (x) { x = Math.floor(x || 0); return (x < 10 ? '0' : '') + x; };
+      r.gpsUtc = d + 'T' + pad(t[0]) + ':' + pad(t[1]) + ':' + pad(t[2]) + 'Z';
+    }
+  }
+
+  if (b.over && r.lat === undefined && r.taken === undefined) return { need: arrayBuffer.byteLength * 4 };
+  if (r.lat === undefined && r.taken === undefined && r.gpsUtc === undefined) return { empty: true };
+
+  if (m0[T.MODEL]) r.model = String(m0[T.MODEL]).trim().slice(0, 64);
+  return r;
+}
+
+/* ---------- driver: progressive read with retries ----------
+ * read(offset, length) must resolve to an ArrayBuffer.
+ * Reads 64KB first; only grows when the metadata provably lies further in.
+ */
+var HEAD0 = 65536;
+var HEAD_MAX = 8 << 20;
+
+function extract(read, fileSize) {
+  var want = Math.min(HEAD0, fileSize);
+  var rounds = 0;
+
+  function attempt(buf) {
+    var loc = locateTiff(buf);
+
+    if (loc.fetch) {
+      if (loc.fetch.offset + 8 > fileSize) return Promise.resolve({ skip: 'bad-offset' });
+      var len = Math.min(loc.fetch.length, fileSize - loc.fetch.offset);
+      return read(loc.fetch.offset, len).then(function (b2) {
+        var t = exifPayloadToTiff(new Buf(new DataView(b2)), 0);
+        var r2 = readTags(b2, t);
+        return r2.need ? { skip: 'truncated' } : r2;
+      });
+    }
+
+    if (loc.tiff !== undefined) {
+      var r = readTags(buf, loc.tiff);
+      if (!r.need) return Promise.resolve(r);
+      loc = { need: r.need };
+    }
+
+    if (loc.need && buf.byteLength < fileSize && buf.byteLength < HEAD_MAX && rounds < 4) {
+      rounds++;
+      want = Math.min(Math.max(loc.need, buf.byteLength * 4), fileSize, HEAD_MAX);
+      if (want <= buf.byteLength) return Promise.resolve({ skip: 'truncated' });
+      return read(0, want).then(attempt);
+    }
+    return Promise.resolve(loc.none ? { skip: loc.none } : (loc.need ? { skip: 'truncated' } : loc));
+  }
+
+  return read(0, want).then(attempt);
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { locateTiff: locateTiff, readTags: readTags, extract: extract };
+}
+
+</script>
+
+<script>
+'use strict';
+const CORE_SRC = document.getElementById('core').textContent;
+const core = (new Function(CORE_SRC + '\nreturn {extract:extract};'))();
+
+const WORKER_GLUE = `
+self.onmessage = function(e){
+  var d = e.data;
+  var run = function(f){
+    var got = 0;
+    var read = function(off, len){ got += len; return f.slice(off, off+len).arrayBuffer(); };
+    return extract(read, f.size).then(function(r){ r.__size = f.size; r.__read = got; return r; });
+  };
+  var p = d.file ? Promise.resolve(d.file) : d.h.getFile();
+  p.then(run).then(function(r){ self.postMessage({id:d.id, path:d.path, r:r}); })
+   .catch(function(err){ self.postMessage({id:d.id, path:d.path, r:{skip:'error', err:String(err && err.message || err)}}); });
+};`;
+
+const $ = id => document.getElementById(id);
+const HAS_FS = typeof window.showDirectoryPicker === 'function' && typeof window.showSaveFilePicker === 'function';
+
+/* ---------------- state ---------------- */
+let dirHandle = null, fileList = null, running = false, abort = false;
+let stats, errors = [], previewRows = 0, memResults = null;
+let excluded = [], excludedRows = 0, excludedTotal = 0;
+const EX_KEEP = 5000;   // 목록으로 보관할 최대 건수 (메모리 상한)
+const EX_ROWS = 200;    // 화면에 그릴 최대 행 수
+
+if (!HAS_FS) {
+  $('compat').classList.remove('hide');
+  $('compat').innerHTML = '이 브라우저는 <b>File System Access API</b>를 지원하지 않아 호환 모드로 동작합니다 ' +
+    '(Chrome·Edge 권장). 호환 모드에서는 파일 목록을 한 번에 메모리에 올리므로 폴더 선택 단계에서 수십 초 멈출 수 있고, ' +
+    '결과는 마지막에 한 번에 내려받습니다.';
+  $('pick').classList.add('hide');
+  $('pickFallback').classList.remove('hide');
+}
+$('workers').oninput = e => $('workersN').textContent = e.target.value;
+$('workers').value = Math.min(16, Math.max(2, (navigator.hardwareConcurrency || 4)));
+$('workersN').textContent = $('workers').value;
+
+$('pick').onclick = async () => {
+  try {
+    dirHandle = await window.showDirectoryPicker({ id: 'photoscan', mode: 'read' });
+    $('pathChip').textContent = dirHandle.name + '/';
+    $('pathChip').classList.remove('hide');
+    $('run').disabled = false;
+    $('pickInfo').textContent = '';
+  } catch (e) { if (e.name !== 'AbortError') alert('폴더를 열 수 없습니다: ' + e.message); }
+};
+$('pickFallback').onclick = () => $('fbInput').click();
+$('fbInput').onchange = e => {
+  fileList = Array.from(e.target.files || []);
+  $('pathChip').textContent = fileList.length.toLocaleString() + '개 파일';
+  $('pathChip').classList.remove('hide');
+  $('run').disabled = fileList.length === 0;
+};
+$('stop').onclick = () => { abort = true; $('phase').textContent = '중지하는 중…'; };
+$('run').onclick = () => start().catch(e => { logLine('치명적 오류: ' + e.message); finishUI(); });
+
+/* ---------------- helpers ---------------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmt = n => n.toLocaleString('ko-KR');
+function bytes(n){ const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(n<10&&i?1:0)+u[i]; }
+function hhmmss(s){ if(!isFinite(s)||s<0) return '–'; s=Math.round(s);
+  const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;
+  return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); }
+function logLine(s){ const el=$('log'); el.classList.remove('hide');
+  el.textContent += s + '\n'; if(el.textContent.length>60000) el.textContent = el.textContent.slice(-40000);
+  el.scrollTop = el.scrollHeight; }
+
+function makeWorkerPool(n){
+  let src;
+  try {
+    src = URL.createObjectURL(new Blob([CORE_SRC + WORKER_GLUE], { type: 'text/javascript' }));
+    const w = new Worker(src);
+    const pool = [w];
+    for (let i = 1; i < n; i++) pool.push(new Worker(src));
+    pool.forEach(x => x.inflight = 0);
+    return { pool, src };
+  } catch (e) {
+    if (src) URL.revokeObjectURL(src);
+    return null;   // file:// or blocked — caller falls back to main thread
+  }
+}
+
+/* ---------------- directory walk ---------------- */
+async function* walk(dir, exts, prefix, depth){
+  if (depth > 24) return;
+  for await (const [name, h] of dir.entries()) {
+    if (abort) return;
+    if (name.charCodeAt(0) === 46 || name === '@eaDir' || name === '#recycle') continue;
+    const p = prefix ? prefix + '/' + name : name;
+    if (h.kind === 'directory') { yield* walk(h, exts, p, depth + 1); continue; }
+    const d = name.lastIndexOf('.');
+    if (d < 0) continue;
+    if (!exts.has(name.slice(d + 1).toLowerCase())) continue;
+    yield { h, path: p };
+  }
+}
+
+/* ---------------- output writer ---------------- */
+function makeWriter(writable){
+  let parts = [], size = 0, first = true, chain = Promise.resolve();
+  const push = s => { parts.push(s); size += s.length; if (size > 1 << 20) flush(); };
+  const flush = () => { if (!parts.length) return; const s = parts.join(''); parts = []; size = 0;
+    chain = chain.then(() => writable ? writable.write(s) : (memResults.push(s), undefined)); };
+  return {
+    open(){ push('[\n'); },
+    add(rec){ push((first ? '' : ',\n') + JSON.stringify(rec)); first = false; },
+    async close(){ push('\n]\n'); flush(); await chain; if (writable) await writable.close(); }
+  };
+}
+
+/* ---------------- main ---------------- */
+async function start(){
+  running = true; abort = false; errors = []; previewRows = 0; memResults = null;
+  excluded = []; excludedRows = 0; excludedTotal = 0;
+  $('run').disabled = true; $('pick').disabled = true; $('pickFallback').disabled = true;
+  $('stop').disabled = false; $('dlRow').classList.add('hide'); $('dlJson').classList.remove('hide');
+  $('mapRow').classList.add('hide');
+  $('log').textContent = ''; $('log').classList.add('hide');
+  $('preview').tBodies[0].innerHTML = ''; $('previewCard').classList.add('hide');
+  $('excluded').tBodies[0].innerHTML = ''; $('excludedCard').classList.add('hide');
+  stats = { scanned: 0, done: 0, gps: 0, timeOnly: 0, none: 0, err: 0, read: 0, t0: performance.now() };
+
+  const exts = new Set($('exts').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+  const wantModel = $('wantModel').checked;
+  const N = parseInt($('workers').value, 10);
+
+  // --- output target ---
+  let writable = null;
+  if (HAS_FS) {
+    $('phase').textContent = '저장 위치를 선택하세요…';
+    let fh;
+    try {
+      fh = await window.showSaveFilePicker({
+        suggestedName: (dirHandle ? dirHandle.name.replace(/[^\w가-힣.-]+/g,'_') : 'photos') + '-geo.json',
+        startIn: dirHandle || undefined,
+        types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
+      });
+    } catch (e) { $('phase').textContent = '취소됨'; return finishUI(); }
+    writable = await fh.createWritable();
+  } else {
+    memResults = [];
+  }
+
+  const out = makeWriter(writable);
+  out.open();
+
+  // --- worker pool ---
+  const wp = makeWorkerPool(N);
+  let mainThreadMode = !wp;
+  if (mainThreadMode) logLine('워커를 만들 수 없어 단일 스레드로 처리합니다. (file:// 로 열면 발생합니다 — 웹서버로 열면 훨씬 빨라집니다)');
+  const pool = wp ? wp.pool : [];
+  const INFLIGHT = 3;
+
+  // --- job queue ---
+  let queue = [], head = 0, scanDone = false, nextId = 1;
+  const jobs = new Map();
+  let resolveAll, allDone = new Promise(r => resolveAll = r);
+
+  function onResult(path, r){
+    stats.done++;
+    stats.read += r.__read || 0;
+    if (r.skip === 'error') {
+      stats.err++;
+      if (errors.length < 5000) errors.push({ path, err: r.err });
+      addExcluded(path, '읽기 오류: ' + (r.err || ''), '');
+    }
+    else if (r.skip || r.empty) { stats.none++; addExcluded(path, '메타데이터 없음', ''); }
+    else if (r.lat === undefined) {
+      stats.timeOnly++;
+      addExcluded(path, '좌표 없음 (촬영일시만 있음)', r.taken || r.gpsUtc || '');
+    }
+    else {
+      stats.gps++;
+      const rec = { path, lat: r.lat, lon: r.lon };
+      if (r.alt !== undefined) rec.alt = r.alt;
+      if (r.taken) { rec.taken = r.taken; if (r.tz) { rec.tz = r.tz; rec.takenUtc = toUtc(r.taken, r.tz); } }
+      if (r.gpsUtc) rec.gpsUtc = r.gpsUtc;
+      if (wantModel && r.model) rec.model = r.model;
+      if (r.__size) rec.size = r.__size;
+      out.add(rec);
+      if (previewRows < 20) { addPreview(rec); previewRows++; }
+    }
+    pump();
+  }
+
+  if (wp) pool.forEach(w => {
+    w.onmessage = e => { w.inflight--; jobs.delete(e.data.id); onResult(e.data.path, e.data.r); };
+    w.onerror = e => { w.inflight = Math.max(0, w.inflight - 1); logLine('워커 오류: ' + e.message); pump(); };
+  });
+
+  let mainBusy = 0;
+  function pump(){
+    if (abort) { head = queue.length; if (idle()) resolveAll(); return; }
+    if (mainThreadMode) {
+      while (mainBusy < 4 && head < queue.length) {
+        const it = queue[head++]; mainBusy++;
+        (it.file ? Promise.resolve(it.file) : it.h.getFile())
+          .then(f => { let got = 0;
+            return core.extract((o, l) => { got += l; return f.slice(o, o + l).arrayBuffer(); }, f.size)
+              .then(r => (r.__size = f.size, r.__read = got, r)); })
+          .catch(err => ({ skip: 'error', err: String(err && err.message || err) }))
+          .then(r => { mainBusy--; onResult(it.path, r); });
+      }
+    } else {
+      outer:
+      for (let i = 0; i < pool.length; i++) {
+        const w = pool[i];
+        while (w.inflight < INFLIGHT && head < queue.length) {
+          const it = queue[head];
+          const id = nextId++;
+          try {
+            w.postMessage(it.h ? { id, h: it.h, path: it.path } : { id, file: it.file, path: it.path });
+          } catch (err) {
+            mainThreadMode = true;
+            logLine('워커로 파일을 넘길 수 없어 단일 스레드로 전환합니다: ' + (err && err.message));
+            break outer;
+          }
+          head++; jobs.set(id, 1); w.inflight++;
+        }
+      }
+      if (mainThreadMode) return pump();
+    }
+    if (head > 8192) { queue = queue.slice(head); head = 0; }
+    if (idle()) resolveAll();
+  }
+  const idle = () => scanDone && head >= queue.length &&
+    mainBusy === 0 && pool.every(w => w.inflight === 0);
+
+  // --- producer ---
+  $('phase').textContent = '스캔 중…';
+  const timer = setInterval(paint, 200);
+  (async () => {
+    try {
+      if (dirHandle) {
+        for await (const it of walk(dirHandle, exts, '', 0)) {
+          queue.push(it); stats.scanned++;
+          if (stats.scanned % 64 === 0) { pump(); if (queue.length - head > 20000) await sleep(25); }
+          if (abort) break;
+        }
+      } else {
+        for (const f of fileList) {
+          const name = f.name, d = name.lastIndexOf('.');
+          if (d < 0 || !exts.has(name.slice(d + 1).toLowerCase())) continue;
+          if (name.charCodeAt(0) === 46) continue;
+          queue.push({ file: f, path: f.webkitRelativePath || name }); stats.scanned++;
+          if (stats.scanned % 256 === 0) { pump(); if (queue.length - head > 20000) await sleep(25); }
+          if (abort) break;
+        }
+      }
+    } catch (e) { logLine('스캔 오류: ' + e.message); }
+    scanDone = true; $('phase').textContent = abort ? '중지됨' : '처리 중…';
+    try { pump(); } catch (e) { logLine('처리 오류: ' + e.message); abort = true; head = queue.length; resolveAll(); }
+  })();
+
+  await allDone;
+  clearInterval(timer);
+  await out.close();
+  if (wp) { pool.forEach(w => w.terminate()); URL.revokeObjectURL(wp.src); }
+  paint();
+
+  const secs = (performance.now() - stats.t0) / 1000;
+  $('phase').textContent = (abort ? '중지됨 — ' : '완료 — ') + fmt(stats.done) + '장 / ' + hhmmss(secs) +
+    (writable ? ' · 파일로 저장됨' : '');
+  if (!writable) $('dlRow').classList.remove('hide');
+  else if (errors.length) { $('dlRow').classList.remove('hide'); $('dlJson').classList.add('hide'); }
+  if (previewRows) $('previewCard').classList.remove('hide');
+  if (stats.gps) $('mapRow').classList.remove('hide');
+  finishExcludedUI();
+  logLine('저장 ' + fmt(stats.gps) + '장 · 제외 ' + fmt(excludedTotal) + '장');
+  logLine('총 ' + fmt(stats.done) + '장 · GPS ' + fmt(stats.gps) + ' · 시간만 ' + fmt(stats.timeOnly) +
+          ' · 메타없음 ' + fmt(stats.none) + ' · 오류 ' + fmt(stats.err) +
+          ' · 실제 읽은 용량 ' + bytes(stats.read) + ' · ' + (stats.done / secs).toFixed(0) + '장/초');
+  errors.slice(0, 12).forEach(e => logLine('  ! ' + e.path + ' — ' + e.err));
+  finishUI();
+}
+
+function finishUI(){
+  running = false;
+  $('run').disabled = false; $('pick').disabled = false; $('pickFallback').disabled = false; $('stop').disabled = true;
+}
+
+function toUtc(taken, tz){
+  const m = /^([+\-])(\d{2}):(\d{2})$/.exec(tz); if (!m) return undefined;
+  const sign = m[1] === '-' ? 1 : -1;
+  const t = Date.parse(taken + 'Z'); if (isNaN(t)) return undefined;
+  return new Date(t + sign * ((+m[2]) * 3600 + (+m[3]) * 60) * 1000).toISOString().replace('.000', '');
+}
+
+function addExcluded(path, reason, taken){
+  excludedTotal++;
+  if (excluded.length < EX_KEEP) excluded.push({ path, reason, taken });
+  if (excludedRows < EX_ROWS) {
+    const tb = $('excluded').tBodies[0], tr = tb.insertRow();
+    [path, reason, taken].forEach(v => { const td = tr.insertCell(); td.textContent = v; td.title = v; });
+    excludedRows++;
+    $('excludedCard').classList.remove('hide');
+  }
+  $('exCount').textContent = '(' + fmt(excludedTotal) + '장)';
+}
+
+function finishExcludedUI(){
+  if (!excludedTotal) { $('excludedCard').classList.add('hide'); return; }
+  $('excludedCard').classList.remove('hide');
+  $('exCount').textContent = '(' + fmt(excludedTotal) + '장)';
+  let note = '위도·경도가 없어 JSON에 담기지 않은 사진입니다. ' +
+    '좌표 없음 ' + fmt(stats.timeOnly) + '장 · 메타데이터 없음 ' + fmt(stats.none) + '장 · 읽기 오류 ' + fmt(stats.err) + '장.';
+  if (excludedRows < excludedTotal) note += ' 화면에는 앞 ' + fmt(excludedRows) + '장만 표시했습니다';
+  if (excludedTotal > EX_KEEP) note += ' (내려받기 파일에는 앞 ' + fmt(EX_KEEP) + '장까지만 기록됩니다)';
+  note += '.';
+  $('exNote').textContent = note;
+}
+
+function addPreview(r){
+  const tb = $('preview').tBodies[0], tr = tb.insertRow();
+  [r.path, r.lat ?? '', r.lon ?? '', r.taken ?? '', r.tz ?? ''].forEach(v => {
+    const td = tr.insertCell(); td.textContent = v; td.title = v;
+  });
+}
+
+let lastPaint = 0, lastDone = 0, rate = 0;
+function paint(){
+  const now = performance.now(), dt = (now - lastPaint) / 1000;
+  if (dt > 0.4) {
+    const r = (stats.done - lastDone) / dt;
+    rate = rate ? rate * 0.7 + r * 0.3 : r;
+    lastPaint = now; lastDone = stats.done;
+  }
+  $('sScanned').textContent = fmt(stats.scanned);
+  $('sDone').textContent = fmt(stats.done);
+  $('sGps').textContent = fmt(stats.gps);
+  $('sTime').textContent = fmt(stats.timeOnly);
+  $('sNone').textContent = fmt(stats.none);
+  $('sErr').textContent = fmt(stats.err);
+  $('sSkip').textContent = fmt(excludedTotal);
+  $('sRate').textContent = rate ? rate.toFixed(0) : '–';
+  $('sEta').textContent = rate > 1 ? hhmmss((stats.scanned - stats.done) / rate) : '–';
+  $('sRead').textContent = bytes(stats.read);
+  if (performance.memory) $('sHeap').textContent = bytes(performance.memory.usedJSHeapSize);
+  $('barFill').style.width = (stats.scanned ? Math.min(100, stats.done / stats.scanned * 100) : 0) + '%';
+}
+
+$('dlJson').onclick = () => {
+  const blob = new Blob(memResults || [], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'photos-geo.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+};
+$('dlExcluded').onclick = () => {
+  const body = excluded.map(e => [e.path, e.reason, e.taken].join('\t')).join('\n');
+  const blob = new Blob(['path\treason\ttaken\n' + body + '\n'], { type: 'text/tab-separated-values' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'photos-excluded.tsv'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+};
+$('dlErr').onclick = () => {
+  const blob = new Blob([errors.map(e => JSON.stringify(e)).join('\n')], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'photos-errors.ndjson'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+};
+</script>
+</body>
+</html>
