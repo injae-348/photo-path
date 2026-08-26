@@ -270,11 +270,18 @@ function cameraBounds(data, acc, h, p, durSec) {
     if (!leg || leg.kind === 'flight' || leg.kind === 'gap') break;
     if (cnt >= CAM.minBack && acc[k] < pMin) break;
   }
-  // 앞으로: 비행이 창 안에 들어오면 도착지까지 한 번 담고 멈춘다
+  // 앞으로: 비행이 창 안에 들어오면 도착지까지 담고 멈춘다.
+  // 단 한 프레임에 통째로 담으면 그 순간 축척이 급히 빠지며 화면이 크게 흔들린다
+  // (산티아고→마드리드 같은 구간에서 눈에 띈다). 비행이 다가올수록 도착지를
+  // 조금씩 끌어당겨, 같은 변화를 앞선 여러 프레임에 나눠 담는다.
   for (let k = i + 1, cnt = 0; k < n && cnt < CAM.maxStep; k++, cnt++) {
-    add(pts[k]);
     const leg = legs[k - 1];
-    if (!leg || leg.kind === 'flight' || leg.kind === 'gap') break;
+    if (!leg || leg.kind === 'flight' || leg.kind === 'gap') {
+      const w = leg ? Math.max(0, Math.min(1, (pMax - acc[k - 1]) * d / CAM.fwdSec)) : 1;
+      add({ x: h.x + (pts[k].x - h.x) * w, y: h.y + (pts[k].y - h.y) * w });
+      break;
+    }
+    add(pts[k]);
     if (cnt >= CAM.minFwd && acc[k] > pMax) break;
   }
   return [x0, y0, x1, y1];

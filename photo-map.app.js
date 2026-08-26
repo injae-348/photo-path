@@ -203,7 +203,7 @@ function stepCamera(v, p, dt) {
     if (ay > 1e-12) cap = Math.min(cap, Math.log2(0.30 * H / (256 * ay)));
     // 빠지는 건 빠르게, 들어가는 건 느긋하게.
     // 대칭으로 두면 화면이 아직 확대된 채로 지구 반대편까지 날아가 빈 화면이 된다.
-    const kz = 1 - Math.pow(t.z < v.z ? 0.012 : 0.09, dt);
+    const kz = 1 - Math.pow(t.z < v.z ? CAMZ.out : CAMZ.in, dt);
     v.z += (t.z - v.z) * kz;
     // 상한도 '즉시 자르기'가 아니라 빠른 감속으로 따라간다. 비행 구간에 들어서는
     // 순간 지점이 화면 밖으로 확 벗어나면서 상한이 몇 단계씩 떨어지는데, 그때
@@ -419,6 +419,8 @@ function updateWarmUI() {
  */
 // 자리를 먼저 잡고(panEnd까지) 그 다음에 파고든다(zoomFrom부터).
 // 이동과 확대를 같은 곡선으로 섞으면 중간에 시작 지점이 화면 밖으로 밀려나 빈 화면이 된다.
+// 축척이 목표를 따라가는 속도. 1초 뒤 남는 오차 비율이라고 보면 된다 (작을수록 빠름).
+const CAMZ = { out: 0.012, in: 0.09 };
 const INTRO = { minSec: 1.6, maxSec: 4.0, perStop: 0.26, minZoom: 1.6, panEnd: 0.45, zoomFrom: 0.3 };
 const easeIO = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
 function playTarget() {
