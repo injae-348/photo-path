@@ -439,7 +439,9 @@ function draw() {
     date: fmtDate(h.t),
     km: fmtKm(h.km),
     foot: `사진 ${Math.min(data.pts.length, h.i + 1 + Math.round(h.f)).toLocaleString('ko-KR')} / ${data.pts.length.toLocaleString('ko-KR')}장 · 방문지 ${data.cities.filter(c => c.t0 <= h.t).length}곳`,
-    attr: opts.base === 'none' ? 'Natural Earth' : (tiles.custom ? '' : tiles.src.attr),
+    // 저작자 표시는 어떤 배경에서도 비우지 않는다. 직접 지정한 서버도 대개 OSM 데이터를 쓴다.
+    attr: opts.base === 'none' ? 'Natural Earth'
+        : (tiles.custom ? ($('customAttr').value.trim() || DEFAULT_ATTR) : tiles.src.attr),
     p: progress,
   }, col, o);
 }
@@ -652,9 +654,10 @@ $('customUrl').oninput = e => {
   updateBaseNote();
   needsDraw = true;
 };
+$('customAttr').oninput = () => { updateBaseNote(); needsDraw = true; };
 
 /* 지도 배경을 고를 때마다, 그 선택이 무엇을 밖으로 내보내는지 그 자리에서 알려준다. */
-const BASE_PROVIDER = { light: 'CARTO', dark: 'CARTO', voyager: 'CARTO', osm: 'OpenStreetMap' };
+const BASE_PROVIDER = { osm: 'OpenStreetMap' };
 function updateBaseNote() {
   const el = $('baseNote');
   if (!el) return;
@@ -676,6 +679,8 @@ function updateBaseNote() {
                      : (BASE_PROVIDER[opts.base] || '지도 서버');
   el.innerHTML =
     '<b>' + who + '에서 지도 그림을 받아옵니다.</b> ' +
+    '저작자 표시 <b>' + esc(custom ? ($('customAttr').value.trim() || DEFAULT_ATTR) : tiles.src.attr) +
+    '</b> 가 영상·PNG 오른쪽 아래에 함께 찍힙니다 — 지우지 마세요. ' +
     '이때 그쪽 서버에는 <b>지금 어느 지역을 얼마나 확대해서 보고 있는지</b>와 접속 IP·브라우저 종류가 남을 수 있어요. ' +
     '재생 중에는 화면이 경로를 따라 움직이니, 이동한 지역의 대략적인 윤곽까지 남을 수 있습니다. ' +
     '사진 파일·좌표값·촬영 시각·파일 이름은 보내지 않습니다. ' +
@@ -723,11 +728,6 @@ $('theme').onchange = e => {
   opts.dark = e.target.value === 'dark';
   document.body.dataset.theme = e.target.value;
   if (!opts.routeColor) $('routeColor').value = THEMES[opts.dark ? 'dark' : 'light'].route;
-  if (opts.base === 'light' || opts.base === 'dark') {
-    const want = opts.dark ? 'dark' : 'light';
-    $('base').value = want; opts.base = want; tiles.setSource(want, $('customUrl').value.trim());
-    updateBaseNote();
-  }
   needsDraw = true;
 };
 $('vertical').onchange = e => {

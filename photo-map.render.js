@@ -1,14 +1,11 @@
 /* ============================ 타일 레이어 ============================ */
+// CARTO 타일은 키 없는 요청에 "API KEY REQUIRED" 워터마크를 씌우므로 뺐다.
+// 남은 온라인 배경은 OSM 하나. 새 소스를 넣을 때는 저작자 표시(attr)를 반드시 채운다.
 const TILE_SOURCES = {
-  light: { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-           sub: 'abcd', max: 19, attr: '© OpenStreetMap · © CARTO' },
-  dark:  { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-           sub: 'abcd', max: 19, attr: '© OpenStreetMap · © CARTO' },
-  osm:   { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-           sub: '', max: 19, attr: '© OpenStreetMap contributors' },
-  voyager: { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-             sub: 'abcd', max: 19, attr: '© OpenStreetMap · © CARTO' },
+  osm: { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+         sub: '', max: 19, attr: '© OpenStreetMap contributors' },
 };
+const DEFAULT_ATTR = '© OpenStreetMap contributors';
 
 class TileLayer {
   constructor() {

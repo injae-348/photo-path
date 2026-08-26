@@ -37,7 +37,7 @@
         <ul>
           <li><b>지도 그림 — 기본은 꺼져 있어요.</b> 지도 배경이 <b>내장 벡터 (오프라인)</b>으로 시작합니다.
             지도 그림이 프로그램 안에 들어 있어서 인터넷을 쓰지 않아요. 도로와 지명이 나오는 지도를 보려고
-            온라인 배경으로 바꾸면, 그때부터 화면에 보이는 만큼의 지도 조각을 지도 회사(CARTO·OpenStreetMap)에서
+            온라인 배경(OpenStreetMap)으로 바꾸면, 그때부터 화면에 보이는 만큼의 지도 조각을 그 서버에서
             받아옵니다. 무엇이 전달되는지는 배경을 고르는 자리에서 바로 알려드려요.</li>
           <li><b>방문 통계.</b> 이 사이트가 올라가 있는 호스팅(Vercel)에 누가 언제 이 페이지를 열었고 얼마나 빨리
             떴는지가 기록됩니다. 국가·브라우저 종류 정도이고, 쿠키는 쓰지 않으며 24시간 뒤 지워집니다.
@@ -122,9 +122,6 @@
     <div class="bar">
       <select id="base" title="지도 배경">
         <option value="none" selected>내장 벡터 (오프라인)</option>
-        <option value="light">밝은 지도 (온라인)</option>
-        <option value="dark">어두운 지도 (온라인)</option>
-        <option value="voyager">컬러 지도 (온라인)</option>
         <option value="osm">OpenStreetMap (온라인)</option>
       </select>
       <select id="theme" title="테마">
@@ -151,6 +148,12 @@
       <div class="bar">
         <input id="customUrl" type="text" placeholder="https://내서버/tiles/{z}/{x}/{y}.png" spellcheck="false">
       </div>
+      <div class="bar">
+        <input id="customAttr" type="text" value="© OpenStreetMap contributors" spellcheck="false"
+               title="영상·PNG 오른쪽 아래에 찍히는 저작자 표시입니다">
+      </div>
+      <p class="note" style="margin-top:6px">저작자 표시는 지우지 마세요. 대부분의 타일 서버는 OpenStreetMap 데이터를
+        쓰기 때문에, 만든 영상을 남에게 보이려면 이 표시가 화면에 있어야 합니다.</p>
     </details>
 
     <details class="note">
