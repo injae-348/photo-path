@@ -130,7 +130,7 @@ function parseLoose(text) {
   const csv = parseCSV(lines);
   if (csv && csv.length) return csv;
   if (objs.length) return objs;
-  throw new Error('JSON으로 읽을 수 없는 파일입니다.');
+  throw new Error('파일을 읽지 못했습니다. JSON·GeoJSON·NDJSON·CSV 형식의 파일인지 확인해 주세요.');
 }
 
 function splitRow(line, sep) {
@@ -228,7 +228,7 @@ function expandGeo(arr) {
 function ingest(text) {
   const root = parseLoose(text);
   let arr = findArray(root);
-  if (!Array.isArray(arr) || !arr.length) throw new Error('레코드 배열을 찾지 못했습니다.');
+  if (!Array.isArray(arr) || !arr.length) throw new Error('파일 안에서 위치 목록을 찾지 못했습니다. 사진 위치나 이동 기록이 담긴 파일인지 확인해 주세요.');
   arr = expandGeo(arr);
 
   const report = { total: arr.length, ok: 0, noGeo: 0, noTime: 0, bad: 0, keys: {}, swapped: 0, source: '' };
@@ -311,9 +311,14 @@ function ingest(text) {
 
   if (plan) report.keys = plan;
   report.source = Array.isArray(root) ? '배열' : (root && root.type ? String(root.type) : '객체');
-  if (!out.length) throw new Error(
-    `${report.total}건을 읽었지만 좌표와 시각을 함께 가진 항목이 없습니다.` +
-    (report.noGeo ? ` (좌표 못 찾음 ${report.noGeo})` : '') +
-    (report.noTime ? ` (시각 못 찾음 ${report.noTime})` : ''));
+  if (!out.length) {
+    const why = [];
+    if (report.noGeo) why.push(`좌표가 없는 항목이 ${report.noGeo.toLocaleString('ko-KR')}건`);
+    if (report.noTime) why.push(`촬영 시각이 없는 항목이 ${report.noTime.toLocaleString('ko-KR')}건`);
+    if (report.bad) why.push(`읽을 수 없는 형식이 ${report.bad.toLocaleString('ko-KR')}건`);
+    throw new Error(
+      `${report.total.toLocaleString('ko-KR')}건을 읽었지만` + (why.length ? ` ${why.join(', ')}이라` : '') +
+      ` 지도에 표시할 항목이 없습니다. 위치와 촬영 시각이 함께 담긴 파일인지 확인해 주세요.`);
+  }
   return { records: out, report };
 }

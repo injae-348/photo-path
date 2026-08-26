@@ -8,7 +8,7 @@ let data = null, W = 0, H = 0;
 let view = { cx: 0.5, cy: 0.5, z: 1.6 };
 let progress = 1, playing = false, recording = false, hoverIdx = -1, pinIdx = -1;
 let lastFrame = 0, phase = 0, needsDraw = true, buckets = null;
-let sched = null, fitZ = 2, lastReport = null, outro = null;
+let sched = null, fitZ = 2, outro = null;
 
 const opts = {
   base: 'light', custom: '', mode: 'smooth', emph: 1.5, camera: 'auto',
@@ -50,20 +50,21 @@ const C = () => {
 
 /* ============================ 파일 읽기 ============================ */
 function loadText(text, name) {
+  // 실패해도 이전 시각화는 남긴다. 대신 리포트를 숨기고 어느 파일이 실패했는지 명시한다.
+  const fail = msg => { $('report').classList.add('hide'); setStatus(`"${name}" — ${msg}`, true); };
   let got;
   try {
     got = ingest(text);                          // 형식은 인제스터가 알아서 맞춘다
   } catch (e) {
-    setStatus(e.message || '파일을 해석하지 못했습니다.', true);
+    fail(e.message || '파일을 해석하지 못했습니다.');
     return;
   }
-  lastReport = got.report;
-  showReport(got.report);
   const d = prepare(got.records);
   if (!d.pts.length) {
-    setStatus('좌표와 시각을 모두 가진 항목이 없습니다.', true);
+    fail('지도에 표시할 수 있는 항목이 없습니다. 위치와 촬영 시각이 함께 담긴 파일인지 확인해 주세요.');
     return;
   }
+  showReport(got.report);
   data = d;
   buckets = makeBuckets(d);
   sched = buildSchedule(d, opts.mode, opts.emph);
@@ -77,24 +78,38 @@ function loadText(text, name) {
   setStatus('');
   needsDraw = true;
 }
-// 무엇을 어떤 키에서 읽었는지 보여준다. 낯선 형식일수록 이게 있어야 믿고 쓴다.
+// 요약 한 줄만 보여주고, 무엇을 어떤 키에서 읽었는지는 '자세히'에 접어둔다.
+// 낯선 형식일수록 이게 있어야 믿고 쓴다 — GeoJSON 내부 키(__lat 등)는 사람 말로 바꿔 보여준다.
+const KEY_NICE = { __lat: 'GeoJSON geometry', __lon: 'GeoJSON geometry',
+                   __time: 'GeoJSON coordTimes', __alt: 'GeoJSON geometry' };
 function showReport(r) {
   const k = r.keys || {};
+  const nice = key => KEY_NICE[key] || key;
   const bits = [];
-  if (k.lat) bits.push(`위도 <code>${esc(k.lat)}</code>`);
-  if (k.lon) bits.push(`경도 <code>${esc(k.lon)}</code>`);
-  if (k.time) bits.push(`시각 <code>${esc(k.time)}</code>`);
-  if (k.alt) bits.push(`고도 <code>${esc(k.alt)}</code>`);
-  if (k.label) bits.push(`이름 <code>${esc(k.label)}</code>`);
+  if (k.lat === '__lat' && k.lon === '__lon') bits.push(`좌표 <code>GeoJSON geometry</code>`);
+  else {
+    if (k.lat) bits.push(`위도 <code>${esc(nice(k.lat))}</code>`);
+    if (k.lon) bits.push(`경도 <code>${esc(nice(k.lon))}</code>`);
+  }
+  if (k.time) bits.push(`시각 <code>${esc(nice(k.time))}</code>`);
+  if (k.alt) bits.push(`고도 <code>${esc(nice(k.alt))}</code>`);
+  if (k.label) bits.push(`이름 <code>${esc(nice(k.label))}</code>`);
   const skip = [];
-  if (r.noGeo) skip.push(`좌표 없음 ${r.noGeo}`);
-  if (r.noTime) skip.push(`시각 없음 ${r.noTime}`);
-  if (r.bad) skip.push(`형식 이상 ${r.bad}`);
-  if (r.swapped) skip.push(`위경도 뒤바뀜 교정 ${r.swapped}`);
+  if (r.noGeo) skip.push(`좌표 없음·범위 밖 ${r.noGeo.toLocaleString('ko-KR')}건`);
+  if (r.noTime) skip.push(`촬영 시각 없음 ${r.noTime.toLocaleString('ko-KR')}건`);
+  if (r.bad) skip.push(`읽을 수 없는 형식 ${r.bad.toLocaleString('ko-KR')}건`);
+  const excluded = r.total - r.ok;
+  const head = excluded
+    ? `총 ${r.total.toLocaleString('ko-KR')}건 중 <b>${r.ok.toLocaleString('ko-KR')}</b>건을 인식했습니다 · ` +
+      `<span class="skip">제외 ${excluded.toLocaleString('ko-KR')}건</span>`
+    : `총 <b>${r.ok.toLocaleString('ko-KR')}</b>건의 위치와 시각을 모두 인식했습니다`;
+  const body = [];
+  if (bits.length) body.push(`읽은 키 — ${bits.join(' · ')}`);
+  if (skip.length) body.push(`<span class="skip">제외 사유 — ${skip.join(' · ')}</span>`);
+  if (r.swapped) body.push(`위도와 경도가 뒤바뀐 파일이라 ${r.swapped.toLocaleString('ko-KR')}건을 자동으로 바로잡았습니다.`);
   $('report').innerHTML =
-    `<b>${r.ok.toLocaleString('ko-KR')}</b> / ${r.total.toLocaleString('ko-KR')}건 인식` +
-    (bits.length ? ' · ' + bits.join(' · ') : '') +
-    (skip.length ? ` · <span class="skip">제외 ${skip.join(', ')}</span>` : '');
+    `<details><summary>${head}<span class="more">자세히</span></summary>` +
+    `<div class="rbody">${body.join('<br>')}</div></details>`;
   $('report').classList.remove('hide');
 }
 const esc = s => String(s).replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
@@ -108,7 +123,7 @@ function pickFile(f) {
   if (!f) return;
   const r = new FileReader();
   r.onload = () => loadText(String(r.result), f.name);
-  r.onerror = () => setStatus('파일을 읽지 못했습니다.', true);
+  r.onerror = () => setStatus('파일을 여는 데 실패했습니다. 파일을 다시 선택해 주세요.', true);
   r.readAsText(f);
 }
 $('file').onchange = e => pickFile(e.target.files[0]);
@@ -300,7 +315,7 @@ function draw() {
 function drawEmpty(col, o) {
   ctx.textAlign = 'center'; ctx.fillStyle = col.hudDim;
   ctx.font = `600 ${o.hud * 0.7}px -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
-  ctx.fillText('추출기가 만든 JSON 파일을 끌어다 놓으세요', W / 2, H / 2);
+  ctx.fillText('위치 기록이 담긴 JSON 파일을 끌어다 놓으세요', W / 2, H / 2);
   ctx.textAlign = 'left';
 }
 
@@ -428,9 +443,12 @@ function showTip(i, e) {
   const tip = $('tip');
   if (i < 0) { tip.classList.add('hide'); return; }
   const p = data.pts[i];
-  tip.innerHTML = `<b>${p.taken ? p.taken.replace('T', ' ') : fmtDate(p.t)}${p.tz ? ' <span>' + p.tz + '</span>' : ''}</b>` +
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(p.taken || '');
+  const when = m ? fmtDate(Date.parse(m[1] + 'T00:00:00Z')) + ' ' + m[2] : fmtDate(p.t, p.tz);
+  const file = p.path ? String(p.path).split(/[\\/]/).pop() : '';   // 전체 경로 대신 파일명만
+  tip.innerHTML = `<b>${esc(when)}${p.tz ? ' <span>' + esc(p.tz) + '</span>' : ''}</b>` +
     `<span>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</span>` +
-    (p.path ? `<span class="pth">${p.path}</span>` : '');
+    (file ? `<span class="pth">${esc(file)}</span>` : '');
   const r = $('stage').getBoundingClientRect();
   tip.style.left = Math.min(r.width - 20, Math.max(10, e.clientX - r.left)) + 'px';
   tip.style.top = Math.max(8, e.clientY - r.top - 12) + 'px';
@@ -442,10 +460,12 @@ function renderStats() {
   const d = data;
   const byDay = new Map();
   for (const p of d.pts) {
-    const k = new Date(p.t).toISOString().slice(0, 10);
+    // 촬영지 현지 날짜로 센다 — p.t(UTC)로 자르면 자정 근처 사진이 하루 어긋난다
+    const k = /^\d{4}-\d{2}-\d{2}/.test(p.taken) ? p.taken.slice(0, 10)
+            : new Date(p.t + tzMs(p.tz)).toISOString().slice(0, 10);
     byDay.set(k, (byDay.get(k) || 0) + 1);
   }
-  let topDay = '–', topN = 0;
+  let topDay = '', topN = 0;
   byDay.forEach((v, k) => { if (v > topN) { topN = v; topDay = k; } });
   const rows = [
     ['총 이동거리', fmtKm(d.total)],
@@ -454,8 +474,8 @@ function renderStats() {
     ['기간', fmtDays(d.t1 - d.t0)],
     ['사진', d.pts.length.toLocaleString('ko-KR') + '장'],
     ['방문지', d.cities.length.toLocaleString('ko-KR') + '곳'],
-    ['가장 많이 찍은 날', topDay + ' (' + topN + '장)'],
-    ['읽다 제외', ((lastReport ? lastReport.noGeo + lastReport.noTime + lastReport.bad : 0)).toLocaleString('ko-KR') + '건'],
+    ['가장 많이 찍은 날',
+     topDay ? fmtDate(Date.parse(topDay + 'T00:00:00Z')) + ' (' + topN.toLocaleString('ko-KR') + '장)' : '–'],
   ];
   $('stats').innerHTML = rows.map(([k, v]) =>
     `<div class="st"><b>${v}</b><span>${k}</span></div>`).join('');
@@ -546,7 +566,7 @@ let rec = null, chunks = [], recAbort = false;
 function checkClean() {
   try { ctx.getImageData(0, 0, 1, 1); return true; }
   catch (e) {
-    setStatus('지도 타일이 CORS를 허용하지 않아 캔버스를 내보낼 수 없습니다. 배경을 "내장 벡터(오프라인)"로 바꾸면 저장됩니다.', true);
+    setStatus('현재 지도 배경(외부 타일)은 브라우저 보안 정책 때문에 이미지·영상으로 저장할 수 없습니다. 지도 배경을 "내장 벡터 (오프라인)"로 바꾸면 항상 저장됩니다.', true);
     return false;
   }
 }
@@ -558,7 +578,7 @@ $('record').onclick = () => {
   const mime = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1.42E01E', 'video/mp4',
                 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
     .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
-  if (!mime) { setStatus('이 브라우저는 캔버스 녹화를 지원하지 않습니다.', true); return; }
+  if (!mime) { setStatus('이 브라우저에서는 영상 저장이 지원되지 않습니다. 크롬이나 엣지에서 다시 시도해 주세요.', true); return; }
   const isMp4 = mime.startsWith('video/mp4');
   const stream = canvas.captureStream(30);
   rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12_000_000 });
