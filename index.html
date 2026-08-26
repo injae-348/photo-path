@@ -6,11 +6,13 @@
 <title>사진 이동 경로 지도</title>
 <link rel="stylesheet" href="photo-map.css">
 <script>
-(() => { // Vercel Web Analytics — 배포된 도메인에서만 로드한다 (로컬로 열 때 404 소음 방지)
+(() => { // Vercel Web Analytics + Speed Insights — 배포된 도메인에서만 로드한다 (로컬로 열 때 404 소음 방지)
   if (!location.protocol.startsWith('http') || ['localhost', '127.0.0.1'].includes(location.hostname)) return;
-  const s = document.createElement('script');
-  s.defer = true; s.src = '/_vercel/insights/script.js';
-  document.head.appendChild(s);
+  for (const src of ['/_vercel/insights/script.js', '/_vercel/speed-insights/script.js']) {
+    const s = document.createElement('script');
+    s.defer = true; s.src = src;
+    document.head.appendChild(s);
+  }
 })();
 </script>
 </head>
