@@ -28,6 +28,7 @@ class TileLayer {
   setSource(name, custom) {
     this.src = TILE_SOURCES[name] || TILE_SOURCES.osm;
     this.custom = custom || '';
+    this.lvl = this.shown = this.prev = undefined;
     this.cache.forEach(v => { v.img.onload = v.img.onerror = null; });
     this.cache.clear();
   }
@@ -86,8 +87,17 @@ class TileLayer {
     }
   }
 
-  draw(ctx, view, W, H) {
-    const iz = Math.max(0, Math.min(this.src.max, Math.round(view.z)));
+  /* 화면에 쓸 축척 단계. Math.round 를 그대로 쓰면 view.z 가 경계(x.5)를 오갈 때마다
+     타일 세트가 통째로 바뀌어 화면이 툭툭 튄다. 여유를 둬서 덜 바꾼다. */
+  level(z) {
+    const want = Math.max(0, Math.min(this.src.max, Math.round(z)));
+    if (this.lvl === undefined || this.lvl > this.src.max) this.lvl = want;
+    if (Math.abs(z - this.lvl) > 0.72) this.lvl = want;
+    return Math.max(0, Math.min(this.src.max, this.lvl));
+  }
+
+  /* 한 축척 단계를 그린다. exact 일 때만 없는 타일을 상·하위로 메운다. */
+  paint(ctx, view, W, H, iz, exact) {
     const n = 1 << iz;
     const scale = 256 * Math.pow(2, view.z - iz);
     const cxp = view.cx * n * scale, cyp = view.cy * n * scale;
@@ -99,10 +109,11 @@ class TileLayer {
       for (let tx = x0; tx <= x1; tx++) {
         const wx = ((tx % n) + n) % n;
         const sx = tx * scale - cxp + W / 2, sy = ty * scale - cyp + H / 2;
-        const img = this.get(iz, wx, ty);
-        if (img.ok) { ctx.drawImage(img, sx, sy, scale + 1, scale + 1); drawn++; continue; }
+        const img = exact ? this.get(iz, wx, ty) : this.peek(iz, wx, ty);
+        if (img && img.ok) { ctx.drawImage(img, sx, sy, scale + 1, scale + 1); drawn++; continue; }
+        if (!exact) continue;                 // 밑그림은 있는 것만 깔고 넘어간다
         missing++;
-        // ① 아직 안 온 타일은 상위(더 축소된) 타일의 해당 사분면으로 임시로 채운다
+        // ① 상위(더 축소된) 타일의 해당 사분면으로 임시로 채운다
         let filled = false;
         for (let up = 1; up <= 5; up++) {
           const pz = iz - up; if (pz < 0) break;
@@ -114,7 +125,6 @@ class TileLayer {
         }
         // ② 그래도 비면 하위(더 확대된) 타일을 모아 채운다.
         //    줌아웃 중에는 방금 보던 세밀한 타일이 캐시에 남아 있으므로 이쪽이 훨씬 잘 맞는다.
-        //    이게 없으면 축척이 한 단계 넘어갈 때마다 화면이 통째로 비어 심하게 흔들린다.
         for (let dn = 1; dn <= 2 && !filled; dn++) {
           const cz = iz + dn; if (cz > this.src.max) break;
           const f = 1 << dn, sub = scale / f;
@@ -127,7 +137,32 @@ class TileLayer {
     }
     return { drawn, missing };
   }
+
+  draw(ctx, view, W, H) {
+    const iz = this.level(view.z);
+    if (iz !== this.shown) {                 // 단계가 바뀌면 이전 단계를 잠깐 남겨둔다
+      this.prev = this.shown; this.shown = iz; this.fadeAt = performance.now();
+    }
+    const fade = this.prev === undefined ? 1
+      : Math.min(1, (performance.now() - this.fadeAt) / TileLayer.FADE_MS);
+    if (fade >= 1) this.prev = undefined;
+
+    // ① 두 단계 성긴 밑그림. 축척이 바뀌어도 바탕이 끊기지 않는다. 타일 수는 16분의 1.
+    if (iz >= 2) this.paint(ctx, view, W, H, iz - 2, false);
+    // ② 직전 단계를 아래에 깔고 새 단계를 서서히 덮는다.
+    //    곧바로 갈아끼우면 확대가 이어지는 내내 화면이 툭툭 튄다 (인트로 줌인이 특히 심하다).
+    if (fade < 1 && this.prev !== undefined && this.prev >= 0) {
+      this.paint(ctx, view, W, H, this.prev, false);
+      ctx.globalAlpha = fade;
+      const r = this.paint(ctx, view, W, H, iz, true);
+      ctx.globalAlpha = 1;
+      return r;
+    }
+    return this.paint(ctx, view, W, H, iz, true);
+  }
 }
+
+TileLayer.FADE_MS = 260;      // 축척 단계를 겹쳐 넘기는 시간
 
 /* ============================ 벡터 배경 ============================ */
 function drawLand(ctx, view, W, H, fill, stroke) {

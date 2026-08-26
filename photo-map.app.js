@@ -192,16 +192,23 @@ function stepCamera(v, p, dt) {
   const kp = 1 - Math.pow(0.0016, dt);
   if (opts.camera === 'auto') {
     const t = cameraTarget(h, p);
+    v.cx += (t.cx - v.cx) * kp;
+    v.cy += (t.cy - v.cy) * kp;
+    // 현재 지점을 화면 안에 두기 위한 축척 상한. 이걸 보간이 끝난 값에 곧바로
+    // min 으로 걸면, 지점이 앞서 나갈 때마다 축척이 프레임 단위로 튀어 화면이
+    // 흔들린다. 목표 쪽에 먼저 반영해서 기존 감속이 매끄럽게 흡수하게 한다.
+    const ax = Math.abs(h.x - v.cx), ay = Math.abs(h.y - v.cy);
+    let cap = Infinity;
+    if (ax > 1e-12) cap = Math.min(cap, Math.log2(0.34 * W / (256 * ax)));
+    if (ay > 1e-12) cap = Math.min(cap, Math.log2(0.30 * H / (256 * ay)));
     // 빠지는 건 빠르게, 들어가는 건 느긋하게.
     // 대칭으로 두면 화면이 아직 확대된 채로 지구 반대편까지 날아가 빈 화면이 된다.
     const kz = 1 - Math.pow(t.z < v.z ? 0.012 : 0.09, dt);
-    v.cx += (t.cx - v.cx) * kp;
-    v.cy += (t.cy - v.cy) * kp;
     v.z += (t.z - v.z) * kz;
-    // 그래도 못 따라가는 순간이 있으므로, 현재 지점은 무슨 일이 있어도 화면 안에 둔다
-    const ax = Math.abs(h.x - v.cx), ay = Math.abs(h.y - v.cy);
-    if (ax > 1e-12) v.z = Math.min(v.z, Math.log2(0.34 * W / (256 * ax)));
-    if (ay > 1e-12) v.z = Math.min(v.z, Math.log2(0.30 * H / (256 * ay)));
+    // 상한도 '즉시 자르기'가 아니라 빠른 감속으로 따라간다. 비행 구간에 들어서는
+    // 순간 지점이 화면 밖으로 확 벗어나면서 상한이 몇 단계씩 떨어지는데, 그때
+    // min 으로 곧바로 자르면 한 프레임에 축척이 통째로 바뀌어 화면이 크게 튄다.
+    if (v.z > cap) v.z += (cap - v.z) * (1 - Math.pow(0.02, dt));
     v.z = Math.max(0.6, v.z);
   } else {
     v.cx += (h.x - v.cx) * kp;
@@ -343,7 +350,7 @@ function planTiles() {
 
   // 재생을 실제로 한 번 돌려보되 그리지는 않는다. 카메라가 목표를 감속해 따라가므로
   // 목표 지점만 훑으면 그 사이를 지나는 축척들을 통째로 놓친다.
-  const FPS = 30, dt = 1 / FPS;
+  const FPS = 60, dt = 1 / FPS;   // 실제 재생과 프레임 간격을 맞춰야 궤적이 덜 어긋난다
   const sim = { cx: wide.cx, cy: wide.cy, z: wide.z };
   const to = playTarget();
   // ① 인트로 — 넓은 화면에서 시작 지점으로 파고드는 동안
@@ -363,7 +370,7 @@ function planTiles() {
   let k = 0;
   for (let p = 0; p <= 1; p += dt / dur) {
     stepCamera(sim, p, dt);
-    if ((k++ % 3) === 0) add(sim);        // 세 프레임에 한 번만 담아도 화면이 겹쳐 충분하다
+    if ((k++ % 2) === 0) add(sim);        // 두 프레임에 한 번만 담아도 화면이 겹쳐 충분하다
   }
   // ③ 줌아웃 — 마지막 화면에서 전체 경로 화면까지
   for (let t = 0; t <= 1.8; t += dt * 3) {
