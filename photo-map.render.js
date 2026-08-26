@@ -57,10 +57,9 @@ class TileLayer {
   }
   peek(z, x, y) { const h = this.cache.get(z + '/' + x + '/' + y); return h && h.img.ok ? h.img : null; }
 
-  /* 그리지 않고 요청만 한다. 카메라가 곧 갈 자리를 미리 받아두면
-     "점이 먼저 그려지고 지도가 뒤늦게 뜨는" 현상이 사라진다. */
-  prefetch(view, W, H) {
-    if (!view || this.loading > 24) return;      // 이미 밀려 있으면 더 얹지 않는다
+  /* 어떤 화면이 어떤 타일을 필요로 하는지만 뽑아낸다 (요청도 그리기도 하지 않는다) */
+  enumerate(view, W, H) {
+    if (!view) return [];
     const iz = Math.max(0, Math.min(this.src.max, Math.round(view.z)));
     const n = 1 << iz;
     const scale = 256 * Math.pow(2, view.z - iz);
@@ -68,13 +67,23 @@ class TileLayer {
     const x0 = Math.floor((cxp - W / 2) / scale), x1 = Math.floor((cxp + W / 2) / scale);
     const y0 = Math.max(0, Math.floor((cyp - H / 2) / scale));
     const y1 = Math.min(n - 1, Math.floor((cyp + H / 2) / scale));
+    const out = [];
+    for (let ty = y0; ty <= y1; ty++)
+      for (let tx = x0; tx <= x1; tx++) out.push([iz, ((tx % n) + n) % n, ty]);
+    return out;
+  }
+  ready(z, x, y) { const h = this.cache.get(z + '/' + x + '/' + y); return !!(h && h.img.ok); }
+
+  /* 그리지 않고 요청만 한다. 카메라가 곧 갈 자리를 미리 받아두면
+     "점이 먼저 그려지고 지도가 뒤늦게 뜨는" 현상이 사라진다. */
+  prefetch(view, W, H) {
+    if (!view || this.loading > 24) return;      // 이미 밀려 있으면 더 얹지 않는다
     let budget = 40;
-    for (let ty = y0; ty <= y1 && budget > 0; ty++)
-      for (let tx = x0; tx <= x1 && budget > 0; tx++) {
-        const wx = ((tx % n) + n) % n;
-        if (!this.cache.has(iz + '/' + wx + '/' + ty)) budget--;
-        this.get(iz, wx, ty);
-      }
+    for (const [z, x, y] of this.enumerate(view, W, H)) {
+      if (budget <= 0) break;
+      if (!this.cache.has(z + '/' + x + '/' + y)) budget--;
+      this.get(z, x, y);
+    }
   }
 
   draw(ctx, view, W, H) {

@@ -183,6 +183,33 @@ function cameraTarget(h, p = progress) {
   return viewFor(h.x + (b[0] - h.x) * k, h.y + (b[1] - h.y) * k,
                  h.x + (b[2] - h.x) * k, h.y + (b[3] - h.y) * k, CAM.pad, minZ);
 }
+/* 카메라를 한 걸음 움직인다. 재생 루프와 '미리 받기' 계획이 똑같은 식을 써야
+   계획한 타일과 실제로 화면에 나오는 타일이 어긋나지 않는다. */
+function stepCamera(v, p, dt) {
+  const h = headAt(data, sched, p);
+  if (!h) return false;
+  // 위치는 빠르게, 축척은 느긋하게 따라간다. 줌이 출렁이면 멀미가 난다.
+  const kp = 1 - Math.pow(0.0016, dt);
+  if (opts.camera === 'auto') {
+    const t = cameraTarget(h, p);
+    // 빠지는 건 빠르게, 들어가는 건 느긋하게.
+    // 대칭으로 두면 화면이 아직 확대된 채로 지구 반대편까지 날아가 빈 화면이 된다.
+    const kz = 1 - Math.pow(t.z < v.z ? 0.012 : 0.09, dt);
+    v.cx += (t.cx - v.cx) * kp;
+    v.cy += (t.cy - v.cy) * kp;
+    v.z += (t.z - v.z) * kz;
+    // 그래도 못 따라가는 순간이 있으므로, 현재 지점은 무슨 일이 있어도 화면 안에 둔다
+    const ax = Math.abs(h.x - v.cx), ay = Math.abs(h.y - v.cy);
+    if (ax > 1e-12) v.z = Math.min(v.z, Math.log2(0.34 * W / (256 * ax)));
+    if (ay > 1e-12) v.z = Math.min(v.z, Math.log2(0.30 * H / (256 * ay)));
+    v.z = Math.max(0.6, v.z);
+  } else {
+    v.cx += (h.x - v.cx) * kp;
+    v.cy += (h.y - v.cy) * kp;
+  }
+  return true;
+}
+
 function snapCamera() {
   if (!data || opts.camera !== 'auto') return;
   const v = cameraTarget(headAt(data, sched, progress));
@@ -272,7 +299,7 @@ function applyRangeFilter() {
  * 온라인 배경에서는 타일이 카메라를 못 따라오면 지도가 뒤늦게 나타난다.
  * 재생 중에는 앞으로 갈 자리를, 줌아웃 직전에는 최종 화면을 미리 요청해 둔다.
  */
-let prefetchT = 0;
+let prefetchT = 0, warmCheckT = 0;
 function viewAt(p) {
   if (!data || !sched) return null;
   const h = headAt(data, sched, p);
@@ -281,6 +308,9 @@ function viewAt(p) {
 }
 function prefetchAhead(dt) {
   if (opts.base === 'none' || !data) return;
+  // 이미 통째로 받아뒀다면 앞당겨 받을 필요가 없다. 오히려 계획에 없는 타일을
+  // 끌어와 캐시를 밀어내므로 받아둔 것이 도로 쫓겨난다.
+  if (warmedKey === warmKey()) return;
   prefetchT += dt;
   if (prefetchT < 0.25) return;
   prefetchT = 0;
@@ -288,6 +318,92 @@ function prefetchAhead(dt) {
   const ahead = Math.min(1, progress + 1.8 / Math.max(2, opts.duration));
   tiles.prefetch(viewAt(ahead), W, H);
   if (progress > 0.8) tiles.prefetch(viewFor(...allBounds(), 0.12), W, H);
+}
+
+/* ============================ 지도 통째로 미리 받기 ============================
+ * 재생 경로는 이미 다 알고 있다. 영상이 지나갈 화면들을 미리 훑어 필요한 타일을
+ * 한 번에 받아두면, 녹화 중에 타일이 늦게 도착해 지도가 비는 일이 아예 없다.
+ * (화면에 들어와야 요청하는 방식으로는 빠른 구간을 절대 따라잡지 못한다.)
+ */
+let warming = false, warmedKey = '';
+// 미리 받아둔 계획이 지금 설정에도 유효한지 가리는 열쇠. 하나라도 바뀌면 경로가 달라진다.
+const warmKey = () => [opts.base, opts.duration, opts.mode, opts.emph, opts.camera, opts.zoom,
+                       opts.vertical, W, H, data ? data.pts.length : 0].join('|');
+function planTiles() {
+  if (!data || !sched || opts.base === 'none') return [];
+  const seen = new Set(), out = [];
+  const add = v => {
+    for (const t of tiles.enumerate(v, W, H)) {
+      const k = t[0] + '/' + t[1] + '/' + t[2];
+      if (seen.has(k)) continue; seen.add(k); out.push(t);
+    }
+  };
+  const wide = viewFor(...allBounds(), 0.12);
+  if (opts.camera === 'fixed') { add(view); return out; }   // 고정 카메라는 지금 화면이 전부다
+
+  // 재생을 실제로 한 번 돌려보되 그리지는 않는다. 카메라가 목표를 감속해 따라가므로
+  // 목표 지점만 훑으면 그 사이를 지나는 축척들을 통째로 놓친다.
+  const FPS = 30, dt = 1 / FPS;
+  const sim = { cx: wide.cx, cy: wide.cy, z: wide.z };
+  const to = playTarget();
+  // ① 인트로 — 넓은 화면에서 시작 지점으로 파고드는 동안
+  const from = { cx: wide.cx, cy: wide.cy,
+                 z: Math.max(0.6, Math.min(wide.z, to.z - INTRO.minZoom)) };
+  const idur = Math.min(INTRO.maxSec, INTRO.minSec + Math.abs(to.z - from.z) * INTRO.perStop);
+  for (let t = 0; t <= idur; t += dt * 3) {
+    const u = Math.min(1, t / idur);
+    const ep = easeIO(Math.min(1, u / INTRO.panEnd));
+    const ez = easeIO(Math.max(0, (u - INTRO.zoomFrom) / (1 - INTRO.zoomFrom)));
+    add({ cx: from.cx + (to.cx - from.cx) * ep, cy: from.cy + (to.cy - from.cy) * ep,
+          z: from.z + (to.z - from.z) * ez });
+  }
+  // ② 본 재생 — 프레임 단위로 카메라를 실제와 같은 식으로 굴린다
+  sim.cx = to.cx; sim.cy = to.cy; sim.z = to.z;
+  const dur = Math.max(2, opts.duration);
+  let k = 0;
+  for (let p = 0; p <= 1; p += dt / dur) {
+    stepCamera(sim, p, dt);
+    if ((k++ % 3) === 0) add(sim);        // 세 프레임에 한 번만 담아도 화면이 겹쳐 충분하다
+  }
+  // ③ 줌아웃 — 마지막 화면에서 전체 경로 화면까지
+  for (let t = 0; t <= 1.8; t += dt * 3) {
+    const u = Math.min(1, t / 1.8), e = easeIO(u);
+    add({ cx: sim.cx + (wide.cx - sim.cx) * e, cy: sim.cy + (wide.cy - sim.cy) * e,
+          z: sim.z + (wide.z - sim.z) * e });
+  }
+  add(wide);
+  return out;
+}
+function warmTiles(after) {
+  if (warming) return;
+  const plan = planTiles();
+  if (!plan.length) { if (after) after(); return; }
+  tiles.max = Math.max(1400, plan.length + 500);   // 받아둔 타일이 도로 쫓겨나지 않게
+  warming = true;
+  $('warm').disabled = true;
+  let i = 0;
+  const total = plan.length;
+  const tick = () => {
+    if (!warming) return;
+    while (i < total && tiles.loading < 24) { const t = plan[i++]; tiles.get(t[0], t[1], t[2]); }
+    const done = plan.reduce((a, t) => a + (tiles.ready(t[0], t[1], t[2]) ? 1 : 0), 0);
+    $('warmN').textContent = `지도 받는 중 ${done.toLocaleString('ko-KR')} / ${total.toLocaleString('ko-KR')}`;
+    if (done >= total || (i >= total && tiles.loading === 0)) {
+      warming = false; $('warm').disabled = false;
+      warmedKey = warmKey();
+      $('warmN').textContent = `지도 ${done.toLocaleString('ko-KR')}장 준비됨`;
+      needsDraw = true;
+      if (after) after();
+      return;
+    }
+    setTimeout(tick, 120);
+  };
+  tick();
+}
+function updateWarmUI() {
+  const on = opts.base !== 'none';
+  $('warm').classList.toggle('hide', !on);
+  if (!on) { $('warmN').textContent = ''; warming = false; warmedKey = ''; }
 }
 
 /* ============================ 시작 줌인 ============================
@@ -415,30 +531,14 @@ function frame(ts) {
     }
   }
   if ((playing || recording) && !intro) prefetchAhead(dt);
+  // 설정이 바뀌면 받아둔 계획은 더 이상 맞지 않는다 — 표시를 지운다
+  warmCheckT += dt;
+  if (warmCheckT > 0.5) {
+    warmCheckT = 0;
+    if (warmedKey && warmedKey !== warmKey()) { warmedKey = ''; if (!warming) $('warmN').textContent = ''; }
+  }
   if (data && !outro && !intro && opts.camera !== 'fixed' && (playing || recording)) {
-    const h = headAt(data, sched, progress);
-    if (h) {
-      // 위치는 빠르게, 축척은 느긋하게 따라간다. 줌이 출렁이면 멀미가 난다.
-      const kp = 1 - Math.pow(0.0016, dt);
-      if (opts.camera === 'auto') {
-        const t = cameraTarget(h);
-        // 빠지는 건 빠르게, 들어가는 건 느긋하게.
-        // 대칭으로 두면 화면이 아직 확대된 채로 지구 반대편까지 날아가 빈 화면이 된다.
-        const kz = 1 - Math.pow(t.z < view.z ? 0.012 : 0.09, dt);
-        view.cx += (t.cx - view.cx) * kp;
-        view.cy += (t.cy - view.cy) * kp;
-        view.z += (t.z - view.z) * kz;
-        // 그래도 못 따라가는 순간이 있으므로, 현재 지점은 무슨 일이 있어도 화면 안에 둔다
-        const ax = Math.abs(h.x - view.cx), ay = Math.abs(h.y - view.cy);
-        if (ax > 1e-12) view.z = Math.min(view.z, Math.log2(0.34 * W / (256 * ax)));
-        if (ay > 1e-12) view.z = Math.min(view.z, Math.log2(0.30 * H / (256 * ay)));
-        view.z = Math.max(0.6, view.z);
-      } else {
-        view.cx += (h.x - view.cx) * kp;
-        view.cy += (h.y - view.cy) * kp;
-      }
-      needsDraw = true;
-    }
+    if (stepCamera(view, progress, dt)) needsDraw = true;
   }
   if (tiles.loading > 0) needsDraw = true;
   if (!needsDraw) return;
@@ -676,6 +776,7 @@ $('stop').onclick = () => {
   fitAll();
 };
 $('fit').onclick = fitAll;
+$('warm').onclick = () => warmTiles();
 $('dateFrom').onchange = applyRangeFilter;
 $('dateTo').onchange = applyRangeFilter;
 $('yearChips').onclick = e => {
@@ -693,7 +794,7 @@ $('base').onchange = e => {
     tiles.prefetch(view, W, H);                       // 지금 화면
     if (data) tiles.prefetch(viewFor(...allBounds(), 0.12), W, H);   // 전체 경로 화면
   }
-  updateBaseNote();
+  updateBaseNote(); updateWarmUI();
   needsDraw = true;
 };
 $('customUrl').oninput = e => {
@@ -736,9 +837,9 @@ function updateBaseNote() {
     '사진 파일·좌표값·촬영 시각·파일 이름은 보내지 않습니다. ' +
     (custom ? '이 서버를 믿을 수 있는지는 직접 확인하세요. ' : '') +
     '신경 쓰이면 <b>내장 벡터 (오프라인)</b>로 되돌리면 됩니다.' +
-    '<span class="warm"><b>영상을 저장하기 전에 ▶ 재생을 한 번 돌려 주세요.</b> ' +
-    '지도 그림은 화면에 보이는 만큼 그때그때 받아오기 때문에, 한 번 훑어 두지 않으면 ' +
-    '영상 중간에 지도가 비어 보일 수 있습니다.</span>';
+    '<span class="warm"><b>● 영상 저장을 누르면 지도를 먼저 다 받아둔 뒤 녹화를 시작합니다.</b> ' +
+    '지도 그림은 화면에 보이는 만큼 받아오기 때문에, 미리 받아두지 않으면 영상 중간에 지도가 ' +
+    '비어 보일 수 있어서예요. 재생만 매끄럽게 보고 싶다면 <b>지도 미리 받기</b>를 눌러 두세요.</span>';
 }
 $('mode').onchange = e => {
   opts.mode = e.target.value;
@@ -812,6 +913,12 @@ $('record').onclick = () => {
   if (!data) return;
   if (recording) { stopRecording(); return; }
   if (!checkClean()) return;
+  // 온라인 배경이면 영상이 지나갈 지도를 먼저 통째로 받아둔다.
+  // 이미 받아둔 상태면 한 박자에 끝나고 바로 녹화로 넘어간다.
+  if (opts.base !== 'none' && !warming) { warmTiles(beginRecording); return; }
+  beginRecording();
+};
+function beginRecording() {
   // mp4(H.264)를 먼저 시도한다 — 릴스·쇼츠에 변환 없이 바로 올라간다. 미지원 브라우저는 webm으로 폴백.
   const mime = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1.42E01E', 'video/mp4',
                 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
@@ -837,7 +944,7 @@ $('record').onclick = () => {
   $('record').textContent = '■ 녹화 중지'; $('record').classList.add('rec');
   $('play').textContent = '❚❚ 일시정지';
   setStatus('녹화 중… 재생이 끝나면 자동으로 저장됩니다.');
-};
+}
 function stopRecording() {
   playing = false; $('play').textContent = '▶ 재생';
   setTimeout(() => { if (rec && rec.state !== 'inactive') rec.stop(); }, 500);
@@ -860,5 +967,6 @@ if (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) {
 $('base').value = opts.base;
 if (opts.base !== 'none') tiles.setSource(opts.base, '');
 updateBaseNote();
+updateWarmUI();
 resize();
 requestAnimationFrame(frame);
