@@ -88,7 +88,8 @@ function drawLand(ctx, view, W, H, fill, stroke) {
   const s = 256 * Math.pow(2, view.z);
   const kMin = Math.floor((view.cx * s - W / 2) / s), kMax = Math.floor((view.cx * s + W / 2) / s);
   ctx.beginPath();
-  for (let k = kMin; k <= kMax; k++) {
+  // 링은 펼친 경도를 쓰므로 화면 밖 한 세계까지 그려야 이음매에서 육지가 잘리지 않는다
+  for (let k = kMin - 1; k <= kMax + 1; k++) {
     const ox = W / 2 - view.cx * s + k * s, oy = H / 2 - view.cy * s;
     for (const ring of LAND) {
       ctx.moveTo(ring[0] * s + ox, ring[1] * s + oy);

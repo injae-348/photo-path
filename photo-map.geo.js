@@ -29,12 +29,33 @@ function decodeRings(s) {
   };
   const out = [];
   while (i < s.length) {
-    const n = rd(), ring = new Float64Array(n * 2);
-    let x = 0, y = 0;
+    const n = rd();
+    // 날짜변경선을 지나는 링(유라시아·남극·피지 등)은 경도가 +180 <-> -180으로 튄다.
+    // 그대로 그리면 지도를 가로지르는 가로줄이 생기므로, 경로 데이터와 같은 방식으로
+    // 경도를 펼쳐서 이어 붙인다.
+    const lon = new Float64Array(n), lat = new Float64Array(n);
+    let x = 0, y = 0, off = 0;
     for (let k = 0; k < n; k++) {
       x += rd(); y += rd();
-      ring[k * 2] = mx(x / 100); ring[k * 2 + 1] = my(y / 100);
+      const L = x / 100;
+      if (k) { const d = (L + off) - lon[k - 1]; if (d > 180) off -= 360; else if (d < -180) off += 360; }
+      lon[k] = L + off; lat[k] = y / 100;
     }
+    // 지구를 한 바퀴 감는 링(남극)은 해안선만 있고 아래가 열려 있다.
+    // 그냥 닫으면 시작점까지 가로줄이 그어지므로 지도 아래 끝을 따라 닫는다.
+    const wrap = Math.round((lon[n - 1] - lon[0]) / 360) !== 0;
+    const m = wrap ? n + 2 : n;
+    const ring = new Float64Array(m * 2);
+    for (let k = 0; k < n; k++) { ring[k * 2] = mx(lon[k]); ring[k * 2 + 1] = my(lat[k]); }
+    if (wrap) {
+      ring[n * 2] = mx(lon[n - 1]);       ring[n * 2 + 1] = 1;
+      ring[(n + 1) * 2] = mx(lon[0]);     ring[(n + 1) * 2 + 1] = 1;
+    }
+    // 펼치는 과정에서 링 전체가 옆 세계로 밀려날 수 있다. 가운데가 [0,1)에 오도록 되돌린다.
+    let lo = Infinity, hi = -Infinity;
+    for (let k = 0; k < m; k++) { const v = ring[k * 2]; if (v < lo) lo = v; if (v > hi) hi = v; }
+    const shift = -Math.floor((lo + hi) / 2);
+    if (shift) for (let k = 0; k < m; k++) ring[k * 2] += shift;
     out.push(ring);
   }
   return out;

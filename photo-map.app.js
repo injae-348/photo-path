@@ -8,11 +8,11 @@ let data = null, W = 0, H = 0;
 let view = { cx: 0.5, cy: 0.5, z: 1.6 };
 let progress = 1, playing = false, recording = false, hoverIdx = -1, pinIdx = -1;
 let lastFrame = 0, phase = 0, needsDraw = true, buckets = null;
-let sched = null, fitZ = 2, outro = null;
+let sched = null, fitZ = 2, outro = null, intro = null;
 
 const opts = {
-  base: 'light', custom: '', mode: 'smooth', emph: 1.5, camera: 'auto',
-  vertical: true, duration: 12, glow: true, dark: false, labels: true, zoom: 3.5,
+  base: 'none', custom: '', mode: 'smooth', emph: 1.5, camera: 'auto',
+  vertical: true, duration: 12, glow: true, dark: false, labels: true, zoom: 1,
   curve: true, routeColor: '',
 };
 const MODE_LABEL = { smooth: '이동 거리에 맞춰', even: '사진 순서대로', real: '실제 시간 흐름' };
@@ -73,9 +73,10 @@ function loadText(text, name) {
   resize();
   $('fileName').textContent = name;
   fitAll();
-  progress = 1; playing = false; outro = null;
+  progress = 1; playing = false; outro = null; intro = null;
+  applySuggestedDuration();
   renderStats();
-  setStatus('');
+  setStatus(`사진 ${d.pts.length.toLocaleString('ko-KR')}장에 맞춰 영상 길이를 ${opts.duration}초로 잡았습니다 — 길이 슬라이더로 바꿀 수 있습니다.`);
   needsDraw = true;
 }
 // 요약 한 줄만 보여주고, 무엇을 어떤 키에서 읽었는지는 '자세히'에 접어둔다.
@@ -161,7 +162,7 @@ function fitAll() {
   const v = viewFor(...allBounds(), 0.12);
   fitZ = v.z;
   view.cx = v.cx; view.cy = v.cy; view.z = v.z;
-  outro = null;                       // 이미 전체 뷰이므로 진행 중인 줌아웃은 무의미하다
+  outro = null; intro = null;         // 이미 전체 뷰이므로 진행 중인 줌아웃·줌인은 무의미하다
   needsDraw = true;
 }
 // 자동 줌이 노리는 목표 뷰
@@ -183,6 +184,54 @@ function snapCamera() {
   if (!data || opts.camera !== 'auto') return;
   const v = cameraTarget(headAt(data, sched, progress));
   view.cx = v.cx; view.cy = v.cy; view.z = v.z;
+}
+
+/* ============================ 시작 줌인 ============================
+ * 재생을 누르자마자 시작 지점으로 순간이동하면 "어디에서 시작하는지"가 남지 않는다.
+ * 전체 경로가 보이는 자리에서 천천히 줌인해 들어간 다음 경로를 그리기 시작한다.
+ */
+// 자리를 먼저 잡고(panEnd까지) 그 다음에 파고든다(zoomFrom부터).
+// 이동과 확대를 같은 곡선으로 섞으면 중간에 시작 지점이 화면 밖으로 밀려나 빈 화면이 된다.
+const INTRO = { minSec: 1.6, maxSec: 4.0, perStop: 0.26, minZoom: 1.6, panEnd: 0.45, zoomFrom: 0.3 };
+const easeIO = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+function playTarget() {
+  const h = headAt(data, sched, 0);
+  return opts.camera === 'auto' ? cameraTarget(h) : { cx: h.x, cy: h.y, z: view.z };
+}
+function startIntro() {
+  intro = null;
+  if (!data || !data.pts.length) return;
+  if (opts.camera === 'fixed') { snapCamera(); return; }   // 고정 카메라는 사용자가 잡아둔 화면을 존중한다
+  const to = playTarget();
+  const wide = viewFor(...allBounds(), 0.12);
+  // 경로가 좁은 지역이라 전체 뷰와 시작 뷰가 비슷해도, 최소 이만큼은 넓은 데서 들어온다
+  const from = { cx: wide.cx, cy: wide.cy,
+                 z: Math.max(0.6, Math.min(wide.z, to.z - INTRO.minZoom)) };
+  view.cx = from.cx; view.cy = from.cy; view.z = from.z;
+  intro = { t: 0, from, to,
+            dur: Math.min(INTRO.maxSec, INTRO.minSec + Math.abs(to.z - from.z) * INTRO.perStop) };
+  needsDraw = true;
+}
+
+/* ============================ 추천 길이 ============================
+ * 사진이 늘면 길이도 늘어야 하지만 비례로 늘리면 금방 지루해진다.
+ * 400장 = 12초를 기준점으로 제곱근에 맞춰 늘린다. (1,000장 19초 · 2,000장 27초 · 10,000장 60초)
+ */
+function suggestDuration(n) {
+  return Math.max(8, Math.min(60, Math.round(12 * Math.sqrt(n / 400))));
+}
+function updateDurHint() {
+  if (!data) { $('durAuto').classList.add('hide'); return; }
+  const s = suggestDuration(data.pts.length);
+  $('durAuto').textContent = '추천 ' + s + '초';
+  $('durAuto').classList.toggle('hide', Math.abs(s - opts.duration) < 1);
+}
+function applySuggestedDuration() {
+  if (!data) return;
+  opts.duration = suggestDuration(data.pts.length);
+  $('dur').value = opts.duration;
+  $('durN').textContent = opts.duration + '초';
+  updateDurHint();
 }
 
 /* ============================ 리사이즈 ============================ */
@@ -217,7 +266,21 @@ function frame(ts) {
   const dt = lastFrame ? Math.min(0.1, (ts - lastFrame) / 1000) : 0;
   lastFrame = ts; phase += dt;
 
-  if (playing && data) {
+  if (intro && (playing || recording)) {
+    // 지도를 직접 만지면(카메라가 고정으로 바뀐다) 인트로는 즉시 사용자에게 양보한다
+    if (opts.camera === 'fixed') intro = null;
+    else {
+      intro.t += dt;
+      const u = Math.min(1, intro.t / intro.dur);
+      const ep = easeIO(Math.min(1, u / INTRO.panEnd));
+      const ez = easeIO(Math.max(0, (u - INTRO.zoomFrom) / (1 - INTRO.zoomFrom)));
+      view.cx = intro.from.cx + (intro.to.cx - intro.from.cx) * ep;
+      view.cy = intro.from.cy + (intro.to.cy - intro.from.cy) * ep;
+      view.z  = intro.from.z  + (intro.to.z  - intro.from.z)  * ez;
+      needsDraw = true;
+      if (u >= 1) intro = null;
+    }
+  } else if (playing && data) {
     progress += dt / Math.max(2, opts.duration);
     if (progress >= 1) {
       progress = 1; playing = false;
@@ -244,7 +307,7 @@ function frame(ts) {
       if (u >= 1) { outro = null; if (recording) stopRecording(); }
     }
   }
-  if (data && !outro && opts.camera !== 'fixed' && (playing || recording)) {
+  if (data && !outro && !intro && opts.camera !== 'fixed' && (playing || recording)) {
     const h = headAt(data, sched, progress);
     if (h) {
       // 위치는 빠르게, 축척은 느긋하게 따라간다. 줌이 출렁이면 멀미가 난다.
@@ -369,7 +432,7 @@ const scrubTo = e => {
   const r = tl.getBoundingClientRect();
   progress = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
   playing = false; $('play').textContent = '▶ 재생';
-  outro = null;
+  outro = null; intro = null;
   snapCamera();
   needsDraw = true;
 };
@@ -485,7 +548,8 @@ function renderStats() {
 $('play').onclick = () => {
   if (!data) return;
   outro = null;
-  if (progress >= 1) { progress = 0; snapCamera(); }
+  // 처음부터 재생할 때만 줌인 인트로를 넣는다. 일시정지 후 재개면 인트로를 이어서 재생한다.
+  if (progress >= 1 && !intro) { progress = 0; startIntro(); }
   playing = !playing;
   $('play').textContent = playing ? '❚❚ 일시정지' : '▶ 재생';
   needsDraw = true;
@@ -497,7 +561,7 @@ $('stop').onclick = () => {
     recAbort = true; recording = false;
     if (rec && rec.state !== 'inactive') rec.stop();
   }
-  playing = false; outro = null; progress = 1;
+  playing = false; outro = null; intro = null; progress = 1;
   $('play').textContent = '▶ 재생';
   fitAll();
 };
@@ -505,12 +569,44 @@ $('fit').onclick = fitAll;
 $('base').onchange = e => {
   opts.base = e.target.value;
   if (opts.base !== 'none') tiles.setSource(opts.base, $('customUrl').value.trim());
+  updateBaseNote();
   needsDraw = true;
 };
 $('customUrl').oninput = e => {
   tiles.setSource(opts.base, e.target.value.trim());
+  updateBaseNote();
   needsDraw = true;
 };
+
+/* 지도 배경을 고를 때마다, 그 선택이 무엇을 밖으로 내보내는지 그 자리에서 알려준다. */
+const BASE_PROVIDER = { light: 'CARTO', dark: 'CARTO', voyager: 'CARTO', osm: 'OpenStreetMap' };
+function updateBaseNote() {
+  const el = $('baseNote');
+  if (!el) return;
+  const custom = $('customUrl').value.trim();
+  let host = '';
+  if (custom) { try { host = new URL(custom.replace(/\{[^}]*\}/g, '0')).hostname; } catch (e) { host = ''; } }
+
+  if (opts.base === 'none') {
+    el.className = 'basenote off';
+    el.innerHTML = custom
+      ? '<b>지금은 지도를 인터넷에서 받아오지 않습니다.</b> 직접 지정한 서버로도 요청하지 않아요. ' +
+        '그 서버를 쓰려면 위에서 온라인 지도를 하나 고르세요.'
+      : '<b>지금은 지도를 인터넷에서 받아오지 않습니다.</b> 지도 그림이 프로그램 안에 들어 있어서, ' +
+        '이 화면을 그리는 동안 밖으로 나가는 요청이 없어요.';
+    return;
+  }
+  el.className = 'basenote on';
+  const who = custom ? (host ? '직접 지정한 서버(' + host + ')' : '직접 지정한 서버')
+                     : (BASE_PROVIDER[opts.base] || '지도 서버');
+  el.innerHTML =
+    '<b>' + who + '에서 지도 그림을 받아옵니다.</b> ' +
+    '이때 그쪽 서버에는 <b>지금 어느 지역을 얼마나 확대해서 보고 있는지</b>와 접속 IP·브라우저 종류가 남을 수 있어요. ' +
+    '재생 중에는 화면이 경로를 따라 움직이니, 이동한 지역의 대략적인 윤곽까지 남을 수 있습니다. ' +
+    '사진 파일·좌표값·촬영 시각·파일 이름은 보내지 않습니다. ' +
+    (custom ? '이 서버를 믿을 수 있는지는 직접 확인하세요. ' : '') +
+    '신경 쓰이면 <b>내장 벡터 (오프라인)</b>로 되돌리면 됩니다.';
+}
 $('mode').onchange = e => {
   opts.mode = e.target.value;
   sched = data ? buildSchedule(data, opts.mode, opts.emph) : null;
@@ -524,7 +620,7 @@ $('emph').oninput = e => {
   sched = data ? buildSchedule(data, opts.mode, opts.emph) : null;
   needsDraw = true;
 };
-$('camera').onchange = e => { opts.camera = e.target.value; snapCamera(); needsDraw = true; };
+$('camera').onchange = e => { opts.camera = e.target.value; intro = null; snapCamera(); needsDraw = true; };
 $('zoom').oninput = e => {
   opts.zoom = +e.target.value;
   const x = Math.pow(2, opts.zoom);
@@ -540,14 +636,19 @@ $('colorReset').onclick = () => {
   needsDraw = true;
 };
 $('labels').onchange = e => { opts.labels = e.target.checked; needsDraw = true; };
-$('dur').oninput = e => { opts.duration = +e.target.value; $('durN').textContent = e.target.value + '초'; };
+$('dur').oninput = e => {
+  opts.duration = +e.target.value; $('durN').textContent = e.target.value + '초';
+  updateDurHint();
+};
+$('durAuto').onclick = applySuggestedDuration;
 $('theme').onchange = e => {
   opts.dark = e.target.value === 'dark';
   document.body.dataset.theme = e.target.value;
   if (!opts.routeColor) $('routeColor').value = THEMES[opts.dark ? 'dark' : 'light'].route;
-  if (opts.base !== 'none' && (opts.base === 'light' || opts.base === 'dark')) {
+  if (opts.base === 'light' || opts.base === 'dark') {
     const want = opts.dark ? 'dark' : 'light';
     $('base').value = want; opts.base = want; tiles.setSource(want, $('customUrl').value.trim());
+    updateBaseNote();
   }
   needsDraw = true;
 };
@@ -595,7 +696,7 @@ $('record').onclick = () => {
   };
   rec.start();
   recAbort = false;
-  recording = true; progress = 0; outro = null; snapCamera(); playing = true;
+  recording = true; progress = 0; outro = null; startIntro(); playing = true;
   $('record').textContent = '■ 녹화 중지'; $('record').classList.add('rec');
   $('play').textContent = '❚❚ 일시정지';
   setStatus('녹화 중… 재생이 끝나면 자동으로 저장됩니다.');
@@ -613,11 +714,14 @@ function saveBlob(blob, name) {
 /* ============================ 시작 ============================ */
 tiles.onload = () => { needsDraw = true; };
 if (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) {
-  opts.dark = true; opts.base = 'dark';
-  $('theme').value = 'dark'; $('base').value = 'dark';
+  // 다크 테마라고 해서 온라인 지도로 바꾸지는 않는다. 기본은 언제나 오프라인 지도다.
+  opts.dark = true;
+  $('theme').value = 'dark';
   $('routeColor').value = THEMES.dark.route;
   document.body.dataset.theme = 'dark';
 }
-tiles.setSource(opts.base, '');
+$('base').value = opts.base;
+if (opts.base !== 'none') tiles.setSource(opts.base, '');
+updateBaseNote();
 resize();
 requestAnimationFrame(frame);

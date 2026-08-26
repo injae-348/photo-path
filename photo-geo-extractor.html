@@ -50,12 +50,28 @@ th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;lett
 .note{font-size:13px;color:var(--dim);margin-top:12px}
 .note code{font:12px var(--mono);background:var(--bg);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
 .hide{display:none}
+.gobtn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;
+  font-size:13.5px;font-weight:600;padding:10px 18px;border-radius:9px;white-space:nowrap}
+.gobtn:hover{opacity:.9;text-decoration:none}
+.gobar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;gap:16px;
+  align-items:center;justify-content:center;flex-wrap:wrap;padding:12px 18px;
+  background:var(--panel);border-top:1px solid var(--line);box-shadow:0 -2px 16px rgba(0,0,0,.07)}
+.gobar .txt{font-size:13px;color:var(--dim)}
+.gobar .txt b{color:var(--ink);font-weight:600}
+@media (max-width:560px){.gobar{gap:9px;padding:10px 14px}.gobar .txt{font-size:12px}}
+body.hasgo .wrap{padding-bottom:130px}
 .banner{border-left:3px solid var(--warn);background:var(--panel);padding:10px 14px;border-radius:0 8px 8px 0;
   font-size:13.5px;color:var(--dim);margin-bottom:16px}
-.privacy-note{border-left:3px solid var(--warn);background:var(--panel);padding:10px 14px;border-radius:0 8px 8px 0;
+.privacy-note{border-left:3px solid var(--accent);background:var(--panel);padding:10px 14px;border-radius:0 8px 8px 0;
   font-size:12.5px;color:var(--dim);margin:0 0 16px;line-height:1.65}
 .privacy-note>b{display:block;color:var(--ink);font-size:13px;margin-bottom:3px}
 .privacy-note p{margin:2px 0}
+.privacy-note b{color:var(--ink);font-weight:600}
+.privacy-note details{margin-top:8px}
+.privacy-note summary{font-size:12px;color:var(--accent);cursor:pointer}
+.privacy-note .pbody{margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+.privacy-note .pbody p{margin:0 0 10px}
+.privacy-note .pbody p:last-child{margin-bottom:0}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
 </style>
@@ -65,11 +81,33 @@ a:hover{text-decoration:underline}
   <h1>사진 위치·시간 추출기</h1>
   <p class="sub">폴더 안의 모든 사진에서 <b>위도·경도·촬영일시</b>만 읽어 JSON으로 저장합니다.
      이미지는 디코딩하지 않고 파일 앞부분 64KB만 읽으므로, 10만 장이어도 메모리는 일정하게 유지됩니다.
-     저장한 JSON은 <a href="./">사진 이동 경로 지도</a>에 끌어다 놓으면 이동 경로를 지도 영상으로 볼 수 있습니다.</p>
+     저장한 JSON은 <a href="index.html">사진 이동 경로 지도</a>에 끌어다 놓으면 이동 경로를 지도 영상으로 볼 수 있습니다.</p>
 
   <div class="privacy-note" role="note">
-    <b>개인정보·외부 통신 안내</b>
-    <p>사진과 JSON은 브라우저 안에서만 처리되며 서버에 업로드되지 않습니다. Vercel에는 접속·성능 정보가 전송될 수 있으며, 온라인 지도(CARTO·OpenStreetMap)를 사용하면 표시 지역을 추정할 수 있는 타일 요청도 해당 지도 서버로 전송됩니다.</p>
+    <b>사진은 이 컴퓨터를 벗어나지 않아요</b>
+    <p>사진도, 만들어진 JSON도 어디로도 올라가지 않습니다 — 받아줄 서버가 아예 없거든요.
+      이 페이지는 지도도 방문 통계도 쓰지 않아서, <b>페이지를 받아오고 나면 밖으로 나가는 요청이 하나도 없습니다.</b></p>
+    <details>
+      <summary>어떻게 그런지 자세히 보기</summary>
+      <div class="pbody">
+        <p><b>사진을 어떻게 읽나요?</b><br>
+          사진 파일의 앞부분 64KB만 살짝 읽어서 촬영 위치와 시각만 꺼냅니다. 사진을 열어 보지도, 고치지도,
+          어디로 보내지도 않아요. 전부 이 브라우저 안에서 끝나고, 탭을 닫으면 읽은 내용도 같이 사라집니다.
+          브라우저에 남는 기록도 없어요.</p>
+        <p><b>정말 아무것도 안 나가나요?</b><br>
+          네. 이 페이지에는 지도도, 방문 통계 스크립트도, 외부 라이브러리도 없습니다.
+          궁금하시면 페이지를 연 다음 인터넷을 끄고 추출해 보세요 — 그대로 다 됩니다.
+          (호스팅 서버의 접속 기록에 "이 페이지를 열었다"가 남을 수 있는데, 이건 어떤 웹사이트든 똑같습니다.)</p>
+        <p><b>저장되는 파일</b><br>
+          저장 버튼을 눌렀을 때만 다운로드 폴더에 만들어집니다.
+          <code>photos-geo.json</code>에는 사진 경로·위도·경도·촬영 시각이,
+          <code>photos-excluded.tsv</code>에는 좌표가 없어 빠진 사진의 경로가 들어갑니다.
+          카메라 모델은 아래 옵션의 <b>카메라 모델 포함</b> 체크를 꺼서 뺄 수 있어요.</p>
+        <p><b>한 가지만 조심하세요.</b>
+          이 파일들에는 집이나 회사 근처 위치가 그대로 담깁니다. 서비스가 흘리는 게 아니라,
+          파일을 남에게 보내거나 올리는 순간 공개돼요. 넘기기 전에 한 번만 확인해 주세요.</p>
+      </div>
+    </details>
   </div>
 
   <div id="compat" class="banner hide"></div>
@@ -126,8 +164,9 @@ a:hover{text-decoration:underline}
       <button id="dlJson" class="primary">JSON 내려받기</button>
       <button id="dlErr">오류 목록 내려받기</button>
     </div>
-    <div class="row hide" id="mapRow" style="margin-top:14px">
-      <a href="./" style="font-weight:550;font-size:13.5px">저장한 JSON을 지도에 그리기 →</a>
+    <div class="row hide" id="mapRow" style="margin-top:16px">
+      <a class="gobtn" href="index.html">지도 그리는 페이지로 이동 →</a>
+      <span style="color:var(--dim);font-size:13px">저장한 JSON을 끌어다 놓으면 이동 경로가 그려집니다.</span>
     </div>
   </div>
 
@@ -146,6 +185,11 @@ a:hover{text-decoration:underline}
     <div class="note" id="exNote"></div>
     <div class="row" style="margin-top:12px"><button id="dlExcluded">제외 목록 내려받기</button></div>
   </div>
+</div>
+
+<div id="goBar" class="gobar hide">
+  <span class="txt"><b>JSON 추출이 끝났습니다.</b> 이제 지도에 이동 경로를 그릴 수 있어요.</span>
+  <a class="gobtn" href="index.html">지도 그리는 페이지로 이동 →</a>
 </div>
 
 <script type="text/js-worker" id="core">
@@ -628,7 +672,7 @@ async function start(){
   excluded = []; excludedRows = 0; excludedTotal = 0;
   $('run').disabled = true; $('pick').disabled = true; $('pickFallback').disabled = true;
   $('stop').disabled = false; $('dlRow').classList.add('hide'); $('dlJson').classList.remove('hide');
-  $('mapRow').classList.add('hide');
+  $('mapRow').classList.add('hide'); $('goBar').classList.add('hide'); document.body.classList.remove('hasgo');
   $('log').textContent = ''; $('log').classList.add('hide');
   $('preview').tBodies[0].innerHTML = ''; $('previewCard').classList.add('hide');
   $('excluded').tBodies[0].innerHTML = ''; $('excludedCard').classList.add('hide');
@@ -778,7 +822,7 @@ async function start(){
   if (!writable) $('dlRow').classList.remove('hide');
   else if (errors.length) { $('dlRow').classList.remove('hide'); $('dlJson').classList.add('hide'); }
   if (previewRows) $('previewCard').classList.remove('hide');
-  if (stats.gps) $('mapRow').classList.remove('hide');
+  if (stats.gps) { $('mapRow').classList.remove('hide'); $('goBar').classList.remove('hide'); document.body.classList.add('hasgo'); }
   finishExcludedUI();
   logLine('저장 ' + fmt(stats.gps) + '장 · 제외 ' + fmt(excludedTotal) + '장');
   logLine('총 ' + fmt(stats.done) + '장 · GPS ' + fmt(stats.gps) + ' · 시간만 ' + fmt(stats.timeOnly) +

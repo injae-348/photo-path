@@ -24,8 +24,35 @@
   </header>
 
   <div class="privacy-note" role="note">
-    <b>개인정보·외부 통신 안내</b>
-    <p>사진과 JSON은 브라우저 안에서만 처리되며 서버에 업로드되지 않습니다. Vercel에는 접속·성능 정보가 전송될 수 있으며, 온라인 지도(CARTO·OpenStreetMap)를 사용하면 표시 지역을 추정할 수 있는 타일 요청도 해당 지도 서버로 전송됩니다.</p>
+    <b>파일은 이 컴퓨터를 벗어나지 않아요</b>
+    <p>넣어주신 JSON은 브라우저 안에서만 읽습니다. 어디로도 올라가지 않아요 — 받아줄 서버가 아예 없거든요.
+      지도 배경도 <b>기본이 오프라인</b>이라, 그냥 쓰면 지도조차 인터넷에서 받아오지 않습니다.</p>
+    <details>
+      <summary>무엇이 밖으로 나가는지 자세히 보기</summary>
+      <div class="pbody">
+        <p><b>파일은 어떻게 처리되나요?</b><br>
+          넣어주신 JSON은 브라우저 안에서만 읽고, 탭을 닫으면 읽은 내용도 같이 사라집니다. 브라우저에 남는 기록도 없어요.
+          파일이 저장되는 건 <b>저장 버튼을 눌렀을 때</b> 다운로드 폴더로 가는 것뿐입니다.</p>
+        <p><b>그럼 밖으로 나가는 건 뭐죠?</b></p>
+        <ul>
+          <li><b>지도 그림 — 기본은 꺼져 있어요.</b> 지도 배경이 <b>내장 벡터 (오프라인)</b>으로 시작합니다.
+            지도 그림이 프로그램 안에 들어 있어서 인터넷을 쓰지 않아요. 도로와 지명이 나오는 지도를 보려고
+            온라인 배경으로 바꾸면, 그때부터 화면에 보이는 만큼의 지도 조각을 지도 회사(CARTO·OpenStreetMap)에서
+            받아옵니다. 무엇이 전달되는지는 배경을 고르는 자리에서 바로 알려드려요.</li>
+          <li><b>방문 통계.</b> 이 사이트가 올라가 있는 호스팅(Vercel)에 누가 언제 이 페이지를 열었고 얼마나 빨리
+            떴는지가 기록됩니다. 국가·브라우저 종류 정도이고, 쿠키는 쓰지 않으며 24시간 뒤 지워집니다.
+            사진과는 아무 상관 없어요. 사진을 직접 읽는 <a href="photo-geo-extractor.html">추출기 페이지</a>에는
+            이것조차 없습니다.</li>
+          <li><b>사이트 파일.</b> 페이지를 여는 순간 화면을 그리는 파일을 받아옵니다. 어떤 웹사이트든 똑같아요.</li>
+        </ul>
+        <p><b>정말 서버로 안 올라가나요?</b><br>
+          네. 파일을 받을 서버 자체가 없습니다. 화면을 그리는 파일 몇 개가 전부고, 계산은 전부 여러분 브라우저가 합니다.
+          궁금하시면 페이지를 연 다음 인터넷을 꺼보세요 — 기본 상태 그대로 처음부터 끝까지 다 돌아갑니다.</p>
+        <p><b>한 가지만 조심하세요.</b>
+          만든 영상과 JSON에는 집이나 회사 근처 위치가 그대로 담깁니다. 서비스가 흘리는 게 아니라,
+          그 파일을 남에게 보내거나 SNS에 올리는 순간 공개돼요. 올리기 전에 시작점과 끝점이 어디인지 한 번만 확인해 주세요.</p>
+      </div>
+    </details>
   </div>
 
   <div id="drop">
@@ -54,6 +81,7 @@
       <div class="sep"></div>
       <label class="opt">길이 <input id="dur" type="range" min="5" max="60" value="12" step="1">
         <b id="durN" style="font:600 12px var(--mono);color:var(--ink)">12초</b></label>
+      <button id="durAuto" class="hide" title="사진 장수에 맞춘 길이로 되돌립니다">추천 12초</button>
       <select id="mode" title="시간 배분 방식">
         <option value="smooth">이동 거리에 맞춰</option>
         <option value="even">사진 순서대로</option>
@@ -66,17 +94,17 @@
         <option value="follow">따라가기 (축척 고정)</option>
         <option value="fixed">고정</option>
       </select>
-      <label class="opt">확대 <input id="zoom" type="range" min="0" max="5" step="0.5" value="3.5">
-        <b id="zoomN" style="font:600 12px var(--mono);color:var(--ink)">11배</b></label>
+      <label class="opt">확대 <input id="zoom" type="range" min="0" max="5" step="0.5" value="1">
+        <b id="zoomN" style="font:600 12px var(--mono);color:var(--ink)">2배</b></label>
     </div>
 
     <div class="bar">
       <select id="base" title="지도 배경">
-        <option value="light">밝은 지도</option>
-        <option value="dark">어두운 지도</option>
-        <option value="voyager">컬러 지도</option>
-        <option value="osm">OpenStreetMap</option>
-        <option value="none">내장 벡터 (오프라인)</option>
+        <option value="none" selected>내장 벡터 (오프라인)</option>
+        <option value="light">밝은 지도 (온라인)</option>
+        <option value="dark">어두운 지도 (온라인)</option>
+        <option value="voyager">컬러 지도 (온라인)</option>
+        <option value="osm">OpenStreetMap (온라인)</option>
       </select>
       <select id="theme" title="테마">
         <option value="light">라이트</option>
@@ -92,6 +120,8 @@
       <button id="record">● 영상 저장</button>
       <button id="png">PNG 저장</button>
     </div>
+
+    <div id="baseNote" class="basenote off"></div>
 
     <div id="stats"></div>
 
