@@ -9,7 +9,7 @@ let view = { cx: 0.5, cy: 0.5, z: 1.6 };
 let progress = 1, playing = false, recording = false, hoverIdx = -1, pinIdx = -1;
 let lastFrame = 0, phase = 0, needsDraw = true, buckets = null;
 let sched = null, fitZ = 2, outro = null, intro = null;
-let rawRecords = null, yearMin = 0, yearMax = 0, lastYears = null;
+let rawRecords = null, dataRange = null, lastRange = null;
 
 const opts = {
   base: 'none', custom: '', mode: 'smooth', emph: 1.5, camera: 'auto',
@@ -67,7 +67,7 @@ function loadText(text, name) {
   }
   showReport(got.report);
   rawRecords = got.records;
-  buildYearOptions();
+  buildRangeControls();
   data = d;
   buckets = makeBuckets(d);
   sched = buildSchedule(d, opts.mode, opts.emph);
@@ -189,59 +189,72 @@ function snapCamera() {
   view.cx = v.cx; view.cy = v.cy; view.z = v.z;
 }
 
-/* ============================ 연도 필터 ============================
- * 여러 해가 섞인 파일에서 "올해만" 또는 "그 여행이 있던 해만" 보고 싶을 때가 많다.
+/* ============================ 기간 필터 ============================
+ * 여러 해가 섞인 파일에서 "그 여행이 있던 기간만" 보고 싶을 때가 많다.
  * 원본 레코드를 그대로 들고 있다가, 고른 구간만 다시 준비해서 지도·통계·타임라인·
- * 추천 길이를 한꺼번에 새로 잡는다.
+ * 추천 길이를 한꺼번에 새로 잡는다. 날짜는 ISO(YYYY-MM-DD)라 문자열 비교로 충분하다.
  */
-function recYear(r) {
+function recDate(r) {
   const s = r.taken || r.takenUtc || r.gpsUtc;
-  if (typeof s === 'string') { const m = /^(\d{4})/.exec(s); if (m) return +m[1]; }
+  if (typeof s === 'string') { const m = /^\d{4}-\d{2}-\d{2}/.exec(s); if (m) return m[0]; }
   const t = timeOf(r);
-  return isNaN(t) ? NaN : new Date(t).getUTCFullYear();
+  return isNaN(t) ? '' : new Date(t).toISOString().slice(0, 10);
 }
-function buildYearOptions() {
-  const seen = new Set();
-  for (const r of rawRecords) { const y = recYear(r); if (!isNaN(y)) seen.add(y); }
-  const years = [...seen].sort((a, b) => a - b);
-  if (years.length < 2) {                       // 한 해뿐이면 고를 것이 없다
-    $('yearBar').classList.add('hide');
-    yearMin = yearMax = years[0] || 0; lastYears = null;
-    return;
+const fmtD = d => d ? `${+d.slice(0, 4)}. ${+d.slice(5, 7)}. ${+d.slice(8, 10)}.` : '';
+const clampD = d => !dataRange ? d : (d < dataRange[0] ? dataRange[0] : (d > dataRange[1] ? dataRange[1] : d));
+
+function buildRangeControls() {
+  const dates = [];
+  for (const r of rawRecords) { const d = recDate(r); if (d) dates.push(d); }
+  dates.sort();
+  if (dates.length < 2 || dates[0] === dates[dates.length - 1]) {   // 하루치뿐이면 고를 것이 없다
+    $('rangeBar').classList.add('hide'); dataRange = lastRange = null; return;
   }
-  yearMin = years[0]; yearMax = years[years.length - 1];
-  const opts_ = years.map(y => `<option value="${y}">${y}년</option>`).join('');
-  $('yearFrom').innerHTML = opts_; $('yearTo').innerHTML = opts_;
-  $('yearFrom').value = yearMin; $('yearTo').value = yearMax;
-  lastYears = [yearMin, yearMax];
-  $('yearBar').classList.remove('hide');
-  updateYearInfo(rawRecords.length);
+  dataRange = [dates[0], dates[dates.length - 1]];
+  lastRange = [dataRange[0], dataRange[1]];
+  const f = $('dateFrom'), t = $('dateTo');
+  f.min = t.min = dataRange[0]; f.max = t.max = dataRange[1];
+  f.value = dataRange[0]; t.value = dataRange[1];
+  // 연도 버튼은 데이터에 실제로 있는 해만. 한 해뿐이면 버튼 자체가 의미 없다.
+  const years = [...new Set(dates.map(d => d.slice(0, 4)))].sort();
+  $('yearChips').innerHTML = years.length < 2 ? '' :
+    years.map(y => `<button type="button" class="chip" data-y="${y}">${y}</button>`).join('') +
+    '<button type="button" class="chip" data-y="all">전체</button>';
+  $('rangeBar').classList.remove('hide');
+  updateRangeInfo(rawRecords.length);
 }
-function updateYearInfo(shown) {
-  const a = +$('yearFrom').value, b = +$('yearTo').value;
-  const whole = a === yearMin && b === yearMax;
-  $('yearAll').classList.toggle('hide', whole);
-  $('yearInfo').textContent = whole
+function updateRangeInfo(shown) {
+  const a = $('dateFrom').value, b = $('dateTo').value;
+  const whole = !dataRange || (a <= dataRange[0] && b >= dataRange[1]);
+  $('rangeInfo').textContent = whole
     ? `전체 기간 · 사진 ${shown.toLocaleString('ko-KR')}장`
     : `사진 ${shown.toLocaleString('ko-KR')}장 (전체 ${rawRecords.length.toLocaleString('ko-KR')}장 중)`;
+  // 지금 고른 구간과 딱 맞는 버튼만 눌린 상태로
+  $('yearChips').querySelectorAll('.chip').forEach(c => {
+    const y = c.dataset.y;
+    const on = y === 'all' ? whole
+      : (!whole && a === clampD(y + '-01-01') && b === clampD(y + '-12-31'));
+    c.classList.toggle('on', on);
+  });
 }
-function applyYearFilter() {
-  if (!rawRecords || !lastYears) return;
-  let a = +$('yearFrom').value, b = +$('yearTo').value;
+function applyRangeFilter() {
+  if (!rawRecords || !dataRange) return;
+  let a = $('dateFrom').value || dataRange[0], b = $('dateTo').value || dataRange[1];
   if (a > b) {                                  // 뒤집어 고르면 조용히 바로잡는다
-    if (a !== lastYears[0]) { b = a; $('yearTo').value = b; }
-    else { a = b; $('yearFrom').value = a; }
+    if (a !== lastRange[0]) { b = a; $('dateTo').value = b; }
+    else { a = b; $('dateFrom').value = a; }
   }
-  const recs = (a === yearMin && b === yearMax)
-    ? rawRecords
-    : rawRecords.filter(r => { const y = recYear(r); return y >= a && y <= b; });
+  const whole = a <= dataRange[0] && b >= dataRange[1];
+  const recs = whole ? rawRecords
+    : rawRecords.filter(r => { const d = recDate(r); return d && d >= a && d <= b; });
   const d = prepare(recs);
   if (!d.pts.length) {                          // 빈 화면으로 만들지 않고 이전 선택으로 되돌린다
-    $('yearFrom').value = lastYears[0]; $('yearTo').value = lastYears[1];
-    setStatus(`${a}${a === b ? '' : '–' + b}년에는 지도에 표시할 사진이 없습니다.`, true);
+    $('dateFrom').value = lastRange[0]; $('dateTo').value = lastRange[1];
+    setStatus(`${fmtD(a)} ~ ${fmtD(b)} 사이에는 지도에 표시할 사진이 없습니다.`, true);
+    updateRangeInfo(data ? data.pts.length : 0);
     return;
   }
-  lastYears = [a, b];
+  lastRange = [a, b];
   data = d; buckets = makeBuckets(d); sched = buildSchedule(d, opts.mode, opts.emph);
   hoverIdx = pinIdx = -1; $('tip').classList.add('hide');
   playing = false; outro = null; intro = null; progress = 1;
@@ -249,9 +262,9 @@ function applyYearFilter() {
   fitAll();
   applySuggestedDuration();
   renderStats();
-  updateYearInfo(d.pts.length);
-  setStatus(a === yearMin && b === yearMax ? '' :
-    `${a}${a === b ? '' : '–' + b}년 사진 ${d.pts.length.toLocaleString('ko-KR')}장만 그립니다. 영상 길이도 그에 맞춰 ${opts.duration}초로 잡았습니다.`);
+  updateRangeInfo(d.pts.length);
+  setStatus(whole ? '' :
+    `${fmtD(a)} ~ ${fmtD(b)} 사진 ${d.pts.length.toLocaleString('ko-KR')}장만 그립니다. 영상 길이도 그에 맞춰 ${opts.duration}초로 잡았습니다.`);
   needsDraw = true;
 }
 
@@ -637,11 +650,15 @@ $('stop').onclick = () => {
   fitAll();
 };
 $('fit').onclick = fitAll;
-$('yearFrom').onchange = applyYearFilter;
-$('yearTo').onchange = applyYearFilter;
-$('yearAll').onclick = () => {
-  $('yearFrom').value = yearMin; $('yearTo').value = yearMax;
-  applyYearFilter();
+$('dateFrom').onchange = applyRangeFilter;
+$('dateTo').onchange = applyRangeFilter;
+$('yearChips').onclick = e => {
+  const b = e.target.closest('button[data-y]');
+  if (!b || !dataRange) return;
+  if (b.dataset.y === 'all') { $('dateFrom').value = dataRange[0]; $('dateTo').value = dataRange[1]; }
+  else { $('dateFrom').value = clampD(b.dataset.y + '-01-01');
+         $('dateTo').value   = clampD(b.dataset.y + '-12-31'); }
+  applyRangeFilter();
 };
 $('base').onchange = e => {
   opts.base = e.target.value;

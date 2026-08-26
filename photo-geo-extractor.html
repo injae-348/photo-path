@@ -6,6 +6,7 @@
 <title>사진 위치·시간 추출기</title>
 <style>
 :root{
+  color-scheme:light dark;
   --bg:#fbfbfa; --panel:#fff; --ink:#1a1a19; --dim:#6b6b66; --line:#e4e4e0;
   --accent:#2f6f4e; --accent-soft:#e8f2ec; --warn:#8a5a00; --err:#a03530;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -50,8 +51,13 @@ th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;lett
 .note{font-size:13px;color:var(--dim);margin-top:12px}
 .note code{font:12px var(--mono);background:var(--bg);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
 .hide{display:none}
-.yin{width:78px;font:12.5px var(--mono);padding:6px 8px;border:1px solid var(--line);
-  border-radius:7px;background:var(--panel);color:var(--ink);text-align:center}
+input[type=date]{font:12.5px var(--mono);padding:6px 8px;border:1px solid var(--line);
+  border-radius:7px;background:var(--panel);color:var(--ink);color-scheme:inherit}
+.chips{display:inline-flex;gap:5px;flex-wrap:wrap}
+.chip{padding:5px 10px;font:600 11.5px/1.2 inherit;cursor:pointer;
+  border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--dim)}
+.chip:hover{border-color:var(--dim);color:var(--ink)}
+.chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .gobtn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;
   font-size:13.5px;font-weight:600;padding:10px 18px;border-radius:9px;white-space:nowrap}
 .gobtn:hover{opacity:.9;text-decoration:none}
@@ -136,15 +142,21 @@ a:hover{text-decoration:underline}
       <label class="opt">동시 처리 <input id="workers" type="range" min="1" max="16" value="6">
         <b id="workersN" style="font:600 13px var(--mono);color:var(--ink)">6</b></label>
       <label class="opt"><input id="wantModel" type="checkbox" checked> 카메라 모델 포함</label>
-      <label class="opt">연도
-        <input id="yFrom" class="yin" type="number" min="1900" max="2100" step="1" placeholder="처음">
+      <label class="opt">기간
+        <input id="dFrom" type="date" title="시작 날짜">
         <span>–</span>
-        <input id="yTo" class="yin" type="number" min="1900" max="2100" step="1" placeholder="끝">
+        <input id="dTo" type="date" title="끝 날짜">
       </label>
+      <span class="chips" id="rangeChips">
+        <button type="button" class="chip" data-r="this">올해</button>
+        <button type="button" class="chip" data-r="last">작년</button>
+        <button type="button" class="chip" data-r="3y">최근 3년</button>
+        <button type="button" class="chip on" data-r="all">전체</button>
+      </span>
     </div>
     <div class="note" style="margin-top:10px">위도·경도가 없는 사진은 결과에서 <b>항상 제외</b>됩니다.
-      <b>연도</b>를 비워 두면 전체 기간을 훑습니다. 한쪽만 채우면 그해부터(또는 그해까지)이고,
-      범위를 정하면 촬영 연도가 그 밖인 사진은 결과에서 빠집니다.
+      <b>기간</b>을 비워 두면 전체를 훑습니다. 한쪽만 채우면 그 날짜부터(또는 그 날짜까지)이고,
+      범위를 정하면 촬영일이 그 밖인 사진은 결과에서 빠집니다.
       제외된 사진은 아래 <b>제외된 사진</b> 목록에서 사유와 함께 확인할 수 있습니다.</div>
     <div style="margin-top:14px">
       <label class="opt" style="display:block;margin-bottom:6px">확장자</label>
@@ -167,7 +179,7 @@ a:hover{text-decoration:underline}
       <div class="stat"><b id="sTime">0</b><span>시간만</span></div>
       <div class="stat warn"><b id="sNone">0</b><span>메타 없음</span></div>
       <div class="stat err"><b id="sErr">0</b><span>오류</span></div>
-      <div class="stat warn"><b id="sYear">0</b><span>연도 밖</span></div>
+      <div class="stat warn"><b id="sRange">0</b><span>기간 밖</span></div>
       <div class="stat warn"><b id="sSkip">0</b><span>제외됨</span></div>
       <div class="stat"><b id="sRate">–</b><span>장/초</span></div>
       <div class="stat"><b id="sEta">–</b><span>남은 시간</span></div>
@@ -594,16 +606,30 @@ let dirHandle = null, fileList = null, running = false, abort = false;
 let stats, errors = [], previewRows = 0, memResults = null;
 let excluded = [], excludedRows = 0, excludedTotal = 0;
 
-/* 촬영 연도. 카메라가 기록한 로컬 시각을 먼저 본다 — 사람이 "몇 년도 사진"이라고
-   말할 때 뜻하는 건 UTC가 아니라 찍은 그 자리의 날짜다. */
-function photoYear(r) {
+/* 촬영일. 카메라가 기록한 로컬 시각을 먼저 본다 — 사람이 "언제 찍은 사진"이라고
+   말할 때 뜻하는 건 UTC가 아니라 찍은 그 자리의 날짜다.
+   ISO(YYYY-MM-DD)로 맞춰 두면 문자열 비교만으로 범위를 판정할 수 있다. */
+function photoDate(r) {
   const s = r.taken || r.gpsUtc;
-  const m = typeof s === 'string' && /^(\d{4})/.exec(s);
-  return m ? +m[1] : NaN;
+  const m = typeof s === 'string' && /^\d{4}-\d{2}-\d{2}/.exec(s);
+  return m ? m[0] : '';
 }
-function inYearRange(r, lo, hi) {
-  const y = photoYear(r);
-  return !isNaN(y) && y >= lo && y <= hi;   // 연도를 모르는 사진은 범위를 걸었을 때 제외한다
+function inDateRange(r, lo, hi) {
+  const d = photoDate(r);
+  return !!d && d >= lo && d <= hi;   // 촬영일을 모르는 사진은 범위를 걸었을 때 제외한다
+}
+
+/* 자주 쓰는 기간을 한 번에 집는 버튼 */
+function setRangeChip(kind) {
+  const y = new Date().getFullYear(), F = $('dFrom'), T = $('dTo');
+  if (kind === 'all')       { F.value = '';                T.value = ''; }
+  else if (kind === 'this') { F.value = y + '-01-01';      T.value = y + '-12-31'; }
+  else if (kind === 'last') { F.value = (y - 1) + '-01-01'; T.value = (y - 1) + '-12-31'; }
+  else if (kind === '3y')   { F.value = (y - 2) + '-01-01'; T.value = y + '-12-31'; }
+  markRangeChips(kind);
+}
+function markRangeChips(kind) {
+  $('rangeChips').querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.r === kind));
 }
 const EX_KEEP = 5000;   // 목록으로 보관할 최대 건수 (메모리 상한)
 const EX_ROWS = 200;    // 화면에 그릴 최대 행 수
@@ -635,6 +661,14 @@ $('fbInput').onchange = e => {
   $('pathChip').textContent = fileList.length.toLocaleString() + '개 파일';
   $('pathChip').classList.remove('hide');
   $('run').disabled = fileList.length === 0;
+};
+$('rangeChips').onclick = e => {
+  const b = e.target.closest('button[data-r]');
+  if (b) setRangeChip(b.dataset.r);
+};
+$('dFrom').oninput = $('dTo').oninput = () => {
+  // 직접 날짜를 만지면 버튼 강조는 풀어 준다 (비워 두면 '전체')
+  markRangeChips(!$('dFrom').value && !$('dTo').value ? 'all' : '');
 };
 $('stop').onclick = () => { abort = true; $('phase').textContent = '중지하는 중…'; };
 $('run').onclick = () => start().catch(e => { logLine('치명적 오류: ' + e.message); finishUI(); });
@@ -703,17 +737,17 @@ async function start(){
   $('log').textContent = ''; $('log').classList.add('hide');
   $('preview').tBodies[0].innerHTML = ''; $('previewCard').classList.add('hide');
   $('excluded').tBodies[0].innerHTML = ''; $('excludedCard').classList.add('hide');
-  stats = { scanned: 0, done: 0, gps: 0, timeOnly: 0, none: 0, err: 0, outYear: 0, read: 0, t0: performance.now() };
+  stats = { scanned: 0, done: 0, gps: 0, timeOnly: 0, none: 0, err: 0, outRange: 0, read: 0, t0: performance.now() };
 
   const exts = new Set($('exts').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
   const wantModel = $('wantModel').checked;
-  // 연도 범위 — 비워 두면 제한 없음. 뒤집어 넣어도 알아서 바로잡는다.
-  let yLo = parseInt($('yFrom').value, 10), yHi = parseInt($('yTo').value, 10);
-  if (isFinite(yLo) && isFinite(yHi) && yLo > yHi) { const t = yLo; yLo = yHi; yHi = t;
-    $('yFrom').value = yLo; $('yTo').value = yHi; }
-  const yearLimited = isFinite(yLo) || isFinite(yHi);
-  if (!isFinite(yLo)) yLo = -Infinity;
-  if (!isFinite(yHi)) yHi = Infinity;
+  // 촬영 기간 — 비워 두면 제한 없음. 뒤집어 넣어도 알아서 바로잡는다.
+  let dLo = $('dFrom').value, dHi = $('dTo').value;
+  if (dLo && dHi && dLo > dHi) { const t = dLo; dLo = dHi; dHi = t;
+    $('dFrom').value = dLo; $('dTo').value = dHi; }
+  const rangeLimited = !!(dLo || dHi);
+  if (!dLo) dLo = '0000-00-00';
+  if (!dHi) dHi = '9999-99-99';
   const N = parseInt($('workers').value, 10);
 
   // --- output target ---
@@ -761,10 +795,10 @@ async function start(){
       stats.timeOnly++;
       addExcluded(path, '좌표 없음 (촬영일시만 있음)', r.taken || r.gpsUtc || '');
     }
-    else if (yearLimited && !inYearRange(r, yLo, yHi)) {
-      stats.outYear++;
-      const y = photoYear(r);
-      addExcluded(path, '연도 범위 밖' + (isNaN(y) ? ' (촬영일시 없음)' : ' (' + y + '년)'),
+    else if (rangeLimited && !inDateRange(r, dLo, dHi)) {
+      stats.outRange++;
+      const d = photoDate(r);
+      addExcluded(path, '기간 밖' + (d ? ' (' + d + ')' : ' (촬영일시 없음)'),
                   r.taken || r.gpsUtc || '');
     }
     else {
@@ -865,7 +899,7 @@ async function start(){
   if (stats.gps) { $('mapRow').classList.remove('hide'); $('goBar').classList.remove('hide'); document.body.classList.add('hasgo'); }
   finishExcludedUI();
   logLine('저장 ' + fmt(stats.gps) + '장 · 제외 ' + fmt(excludedTotal) + '장'
-    + (stats.outYear ? ' (연도 범위 밖 ' + fmt(stats.outYear) + '장 포함)' : ''));
+    + (stats.outRange ? ' (기간 밖 ' + fmt(stats.outRange) + '장 포함)' : ''));
   logLine('총 ' + fmt(stats.done) + '장 · GPS ' + fmt(stats.gps) + ' · 시간만 ' + fmt(stats.timeOnly) +
           ' · 메타없음 ' + fmt(stats.none) + ' · 오류 ' + fmt(stats.err) +
           ' · 실제 읽은 용량 ' + bytes(stats.read) + ' · ' + (stats.done / secs).toFixed(0) + '장/초');
@@ -930,7 +964,7 @@ function paint(){
   $('sTime').textContent = fmt(stats.timeOnly);
   $('sNone').textContent = fmt(stats.none);
   $('sErr').textContent = fmt(stats.err);
-  $('sYear').textContent = fmt(stats.outYear);
+  $('sRange').textContent = fmt(stats.outRange);
   $('sSkip').textContent = fmt(excludedTotal);
   $('sRate').textContent = rate ? rate.toFixed(0) : '–';
   $('sEta').textContent = rate > 1 ? hhmmss((stats.scanned - stats.done) / rate) : '–';

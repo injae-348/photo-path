@@ -60,8 +60,8 @@
             남는 건 도시 이름과 경로 모양뿐입니다. 서울인 건 알아도 서울 어디인지는 알기 어렵습니다.</li>
         </ul>
         <p>다만 어느 쪽이든 <b>날짜·도시·자주 간 곳의 개수·이동 거리</b>는 그대로 보입니다.
-          집 근처가 드러나는 게 걱정되면 <b>지도 배경을 기본 그대로 두고</b>, 위쪽 <b>연도</b>로
-          보여주고 싶은 기간만 골라서 만드세요.</p>
+          집 근처가 드러나는 게 걱정되면 <b>지도 배경을 기본 그대로 두고</b>, 위쪽 <b>기간</b>에서
+          보여주고 싶은 날짜만 골라서 만드세요.</p>
       </div>
     </details>
   </div>
@@ -85,14 +85,14 @@
 
     <canvas id="timeline"></canvas>
 
-    <div class="bar hide" id="yearBar">
-      <label class="opt">연도
-        <select id="yearFrom" title="시작 연도"></select>
+    <div class="bar hide" id="rangeBar">
+      <label class="opt">기간
+        <input id="dateFrom" type="date" title="시작 날짜">
         <span style="color:var(--dim)">–</span>
-        <select id="yearTo" title="끝 연도"></select>
+        <input id="dateTo" type="date" title="끝 날짜">
       </label>
-      <button id="yearAll" class="hide" title="전체 기간으로 되돌립니다">전체 기간</button>
-      <span id="yearInfo" style="color:var(--dim);font-size:12.5px"></span>
+      <span id="yearChips" class="chips"></span>
+      <span id="rangeInfo" style="color:var(--dim);font-size:12.5px"></span>
     </div>
 
     <div class="bar">

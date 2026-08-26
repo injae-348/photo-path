@@ -1,16 +1,19 @@
 :root{
+  color-scheme:light;
   --bg:#f7f7f6; --panel:#fff; --ink:#16181a; --dim:#666d74; --line:#e3e4e1;
   --accent:#e8542f; --accent-soft:#fdeee9; --warn:#8a5a00; --safe:#2f7d55;
   --shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06);
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 body[data-theme=dark]{
+  color-scheme:dark;
   --bg:#101317; --panel:#191d22; --ink:#eceef0; --dim:#949ba2; --line:#282e35;
   --accent:#ff7a52; --accent-soft:#2a1a14; --warn:#e0a34c; --safe:#63bd8d;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
 }
 @media (prefers-color-scheme:dark){
   body:not([data-theme=light]){
+    color-scheme:dark;
     --bg:#101317; --panel:#191d22; --ink:#eceef0; --dim:#949ba2; --line:#282e35;
     --accent:#ff7a52; --accent-soft:#2a1a14; --warn:#e0a34c; --safe:#63bd8d;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
@@ -52,10 +55,14 @@ button{font:inherit;font-weight:550;padding:8px 15px;border-radius:8px;border:1p
 button:hover{border-color:var(--dim)}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.rec{background:#c62828;border-color:#c62828;color:#fff}
-#yearAll{padding:5px 9px;font-size:11.5px;font-weight:600;
-  color:var(--accent);background:var(--accent-soft);border-color:var(--accent-soft)}
-#yearAll:hover{border-color:var(--accent)}
-#yearBar{margin-top:-2px}
+#rangeBar{margin-top:-2px}
+input[type=date]{font:12.5px var(--mono);padding:6px 8px;border:1px solid var(--line);
+  border-radius:7px;background:var(--panel);color:var(--ink);color-scheme:inherit}
+.chips{display:inline-flex;gap:5px;flex-wrap:wrap}
+.chip{padding:5px 10px;font-size:11.5px;font-weight:600;line-height:1.2;
+  border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--dim)}
+.chip:hover{border-color:var(--dim);color:var(--ink)}
+.chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .basenote .warm{display:block;margin-top:6px}
 #durAuto{padding:5px 9px;font-size:11.5px;font-weight:600;
   color:var(--accent);background:var(--accent-soft);border-color:var(--accent-soft)}
