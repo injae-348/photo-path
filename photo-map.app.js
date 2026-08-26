@@ -470,6 +470,17 @@ $('play').onclick = () => {
   $('play').textContent = playing ? '❚❚ 일시정지' : '▶ 재생';
   needsDraw = true;
 };
+// 잘못 눌렀을 때의 탈출구 — 일시정지와 달리 처음(전체 경로) 화면으로 완전히 되돌린다
+$('stop').onclick = () => {
+  if (!data) return;
+  if (recording) {                 // 녹화 중 정지는 취소다. 잘못 누른 걸 저장까지 하면 더 성가시다.
+    recAbort = true; recording = false;
+    if (rec && rec.state !== 'inactive') rec.stop();
+  }
+  playing = false; outro = null; progress = 1;
+  $('play').textContent = '▶ 재생';
+  fitAll();
+};
 $('fit').onclick = fitAll;
 $('base').onchange = e => {
   opts.base = e.target.value;
@@ -531,7 +542,7 @@ $('png').onclick = () => {
 };
 
 /* ============================ 녹화 ============================ */
-let rec = null, chunks = [];
+let rec = null, chunks = [], recAbort = false;
 function checkClean() {
   try { ctx.getImageData(0, 0, 1, 1); return true; }
   catch (e) {
@@ -554,14 +565,16 @@ $('record').onclick = () => {
   chunks = [];
   rec.ondataavailable = e => e.data.size && chunks.push(e.data);
   rec.onstop = () => {
-    saveBlob(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }),
-             isMp4 ? 'photo-map.mp4' : 'photo-map.webm');
     recording = false; $('record').textContent = '● 영상 저장';
     $('record').classList.remove('rec');
+    if (recAbort) { recAbort = false; setStatus('녹화를 취소했습니다. 파일은 저장되지 않았습니다.'); return; }
+    saveBlob(new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }),
+             isMp4 ? 'photo-map.mp4' : 'photo-map.webm');
     setStatus(isMp4 ? 'mp4로 저장했습니다. 릴스·쇼츠에 바로 올릴 수 있습니다.'
                     : 'webm으로 저장했습니다. 쇼츠(웹 업로드)는 그대로 되고, 릴스는 mp4로 변환이 필요합니다.');
   };
   rec.start();
+  recAbort = false;
   recording = true; progress = 0; outro = null; snapCamera(); playing = true;
   $('record').textContent = '■ 녹화 중지'; $('record').classList.add('rec');
   $('play').textContent = '❚❚ 일시정지';
