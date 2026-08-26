@@ -169,8 +169,8 @@ function fitAll() {
   needsDraw = true;
 }
 // 자동 줌이 노리는 목표 뷰
-function cameraTarget(h) {
-  const b = cameraBounds(data, sched, h, progress, opts.duration);
+function cameraTarget(h, p = progress) {
+  const b = cameraBounds(data, sched, h, p, opts.duration);
   const minZ = Math.min(fitZ, 1.2);
   const base = viewFor(b[0], b[1], b[2], b[3], CAM.pad, minZ);
   if (opts.zoom <= 0.01) return base;
@@ -268,6 +268,28 @@ function applyRangeFilter() {
   needsDraw = true;
 }
 
+/* ============================ 타일 미리 받기 ============================
+ * 온라인 배경에서는 타일이 카메라를 못 따라오면 지도가 뒤늦게 나타난다.
+ * 재생 중에는 앞으로 갈 자리를, 줌아웃 직전에는 최종 화면을 미리 요청해 둔다.
+ */
+let prefetchT = 0;
+function viewAt(p) {
+  if (!data || !sched) return null;
+  const h = headAt(data, sched, p);
+  if (!h) return null;
+  return opts.camera === 'auto' ? cameraTarget(h, p) : { cx: h.x, cy: h.y, z: view.z };
+}
+function prefetchAhead(dt) {
+  if (opts.base === 'none' || !data) return;
+  prefetchT += dt;
+  if (prefetchT < 0.25) return;
+  prefetchT = 0;
+  // 1.8초 뒤 화면을 미리 받는다. 재생이 끝나갈 무렵엔 줌아웃 도착지도 함께.
+  const ahead = Math.min(1, progress + 1.8 / Math.max(2, opts.duration));
+  tiles.prefetch(viewAt(ahead), W, H);
+  if (progress > 0.8) tiles.prefetch(viewFor(...allBounds(), 0.12), W, H);
+}
+
 /* ============================ 시작 줌인 ============================
  * 재생을 누르자마자 시작 지점으로 순간이동하면 "어디에서 시작하는지"가 남지 않는다.
  * 전체 경로가 보이는 자리에서 천천히 줌인해 들어간 다음 경로를 그리기 시작한다.
@@ -292,6 +314,8 @@ function startIntro() {
   view.cx = from.cx; view.cy = from.cy; view.z = from.z;
   intro = { t: 0, from, to,
             dur: Math.min(INTRO.maxSec, INTRO.minSec + Math.abs(to.z - from.z) * INTRO.perStop) };
+  // 인트로가 도는 1.6~4초 동안 도착지 타일을 미리 받아둔다
+  if (opts.base !== 'none') { tiles.prefetch(from, W, H); tiles.prefetch(to, W, H); }
   needsDraw = true;
 }
 
@@ -371,6 +395,7 @@ function frame(ts) {
       if (opts.camera !== 'fixed') {
         outro = { t: 0, dur: 1.8, from: { cx: view.cx, cy: view.cy, z: view.z },
                   to: viewFor(...allBounds(), 0.12) };
+        if (opts.base !== 'none') tiles.prefetch(outro.to, W, H);
       } else if (recording) stopRecording();
     }
     needsDraw = true;
@@ -389,6 +414,7 @@ function frame(ts) {
       if (u >= 1) { outro = null; if (recording) stopRecording(); }
     }
   }
+  if ((playing || recording) && !intro) prefetchAhead(dt);
   if (data && !outro && !intro && opts.camera !== 'fixed' && (playing || recording)) {
     const h = headAt(data, sched, progress);
     if (h) {
@@ -662,7 +688,11 @@ $('yearChips').onclick = e => {
 };
 $('base').onchange = e => {
   opts.base = e.target.value;
-  if (opts.base !== 'none') tiles.setSource(opts.base, $('customUrl').value.trim());
+  if (opts.base !== 'none') {
+    tiles.setSource(opts.base, $('customUrl').value.trim());
+    tiles.prefetch(view, W, H);                       // 지금 화면
+    if (data) tiles.prefetch(viewFor(...allBounds(), 0.12), W, H);   // 전체 경로 화면
+  }
   updateBaseNote();
   needsDraw = true;
 };

@@ -18,7 +18,7 @@ const DEFAULT_ATTR = '© OpenStreetMap contributors';
 class TileLayer {
   constructor() {
     this.cache = new Map();      // key -> {img, t}
-    this.max = 600;
+    this.max = 1400;   // 온라인 타일에서는 넉넉해야 줌아웃 때 방금 본 타일이 남아 있다
     this.tainted = false;
     this.loading = 0;
     this.src = TILE_SOURCES.osm;
@@ -50,12 +50,32 @@ class TileLayer {
     img.src = this.url(z, x, y);
     this.cache.set(key, { img, t: performance.now() });
     if (this.cache.size > this.max) {
-      const dead = [...this.cache.entries()].sort((a, b) => a[1].t - b[1].t).slice(0, 120);
+      const dead = [...this.cache.entries()].sort((a, b) => a[1].t - b[1].t).slice(0, 200);
       dead.forEach(([k, v]) => { v.img.onload = v.img.onerror = null; this.cache.delete(k); });
     }
     return img;
   }
   peek(z, x, y) { const h = this.cache.get(z + '/' + x + '/' + y); return h && h.img.ok ? h.img : null; }
+
+  /* 그리지 않고 요청만 한다. 카메라가 곧 갈 자리를 미리 받아두면
+     "점이 먼저 그려지고 지도가 뒤늦게 뜨는" 현상이 사라진다. */
+  prefetch(view, W, H) {
+    if (!view || this.loading > 24) return;      // 이미 밀려 있으면 더 얹지 않는다
+    const iz = Math.max(0, Math.min(this.src.max, Math.round(view.z)));
+    const n = 1 << iz;
+    const scale = 256 * Math.pow(2, view.z - iz);
+    const cxp = view.cx * n * scale, cyp = view.cy * n * scale;
+    const x0 = Math.floor((cxp - W / 2) / scale), x1 = Math.floor((cxp + W / 2) / scale);
+    const y0 = Math.max(0, Math.floor((cyp - H / 2) / scale));
+    const y1 = Math.min(n - 1, Math.floor((cyp + H / 2) / scale));
+    let budget = 40;
+    for (let ty = y0; ty <= y1 && budget > 0; ty++)
+      for (let tx = x0; tx <= x1 && budget > 0; tx++) {
+        const wx = ((tx % n) + n) % n;
+        if (!this.cache.has(iz + '/' + wx + '/' + ty)) budget--;
+        this.get(iz, wx, ty);
+      }
+  }
 
   draw(ctx, view, W, H) {
     const iz = Math.max(0, Math.min(this.src.max, Math.round(view.z)));
@@ -73,14 +93,26 @@ class TileLayer {
         const img = this.get(iz, wx, ty);
         if (img.ok) { ctx.drawImage(img, sx, sy, scale + 1, scale + 1); drawn++; continue; }
         missing++;
-        // 아직 안 온 타일은 상위 줌 타일의 해당 사분면으로 임시로 채운다
-        for (let up = 1; up <= 4; up++) {
+        // ① 아직 안 온 타일은 상위(더 축소된) 타일의 해당 사분면으로 임시로 채운다
+        let filled = false;
+        for (let up = 1; up <= 5; up++) {
           const pz = iz - up; if (pz < 0) break;
           const p = this.peek(pz, wx >> up, ty >> up);
           if (!p) continue;
           const f = 1 << up, sub = 256 / f;
           ctx.drawImage(p, (wx % f) * sub, (ty % f) * sub, sub, sub, sx, sy, scale + 1, scale + 1);
-          break;
+          filled = true; break;
+        }
+        // ② 그래도 비면 하위(더 확대된) 타일을 모아 채운다.
+        //    줌아웃 중에는 방금 보던 세밀한 타일이 캐시에 남아 있으므로 이쪽이 훨씬 잘 맞는다.
+        //    이게 없으면 축척이 한 단계 넘어갈 때마다 화면이 통째로 비어 심하게 흔들린다.
+        for (let dn = 1; dn <= 2 && !filled; dn++) {
+          const cz = iz + dn; if (cz > this.src.max) break;
+          const f = 1 << dn, sub = scale / f;
+          for (let j = 0; j < f; j++) for (let i = 0; i < f; i++) {
+            const c = this.peek(cz, wx * f + i, ty * f + j);
+            if (c) { ctx.drawImage(c, sx + i * sub, sy + j * sub, sub + 1, sub + 1); filled = true; }
+          }
         }
       }
     }
