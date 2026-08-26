@@ -9,12 +9,7 @@
 > 사진은 앞 64KB만 읽어 위치·시각을 꺼내고, 나머지는 전부 브라우저 안에서 끝납니다.
 > 지도 배경도 **기본이 오프라인**이라, 그냥 쓰면 지도 요청조차 나가지 않습니다. → [개인정보와 외부 통신](#개인정보와-외부-통신)
 
-<p align="center">
-  <a href="docs/demo.gif">
-    <img src="docs/demo-poster.jpg" width="300" alt="이동 경로 재생 데모 — 눌러서 재생">
-  </a><br>
-  <sub><b>▶ 눌러서 재생</b> · 11초</sub>
-</p>
+https://github.com/user-attachments/assets/f45b1236-1b46-4c62-9581-d64d1dde2461
 
 ## 동작 흐름
 
