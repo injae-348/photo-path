@@ -13,12 +13,12 @@ class TileLayer {
     this.max = 600;
     this.tainted = false;
     this.loading = 0;
-    this.src = TILE_SOURCES.light;
+    this.src = TILE_SOURCES.osm;
     this.custom = '';
     this.onload = null;
   }
   setSource(name, custom) {
-    this.src = TILE_SOURCES[name] || TILE_SOURCES.light;
+    this.src = TILE_SOURCES[name] || TILE_SOURCES.osm;
     this.custom = custom || '';
     this.cache.forEach(v => { v.img.onload = v.img.onerror = null; });
     this.cache.clear();
