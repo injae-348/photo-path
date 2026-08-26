@@ -10,7 +10,10 @@
 > 지도 배경도 **기본이 오프라인**이라, 그냥 쓰면 지도 요청조차 나가지 않습니다. → [개인정보와 외부 통신](#개인정보와-외부-통신)
 
 <p align="center">
-  <img src="docs/demo.gif" width="300" alt="이동 경로 재생 데모 — 날짜와 누적 이동 거리가 표시되며 경로가 지도 위에 그려진다">
+  <a href="docs/demo.gif">
+    <img src="docs/demo-poster.jpg" width="300" alt="이동 경로 재생 데모 — 눌러서 재생">
+  </a><br>
+  <sub><b>▶ 눌러서 재생</b> · 11초</sub>
 </p>
 
 ## 동작 흐름
