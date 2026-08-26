@@ -1,0 +1,116 @@
+:root{
+  --bg:#f7f7f6; --panel:#fff; --ink:#16181a; --dim:#666d74; --line:#e3e4e1;
+  --accent:#e8542f; --accent-soft:#fdeee9; --shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06);
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+body[data-theme=dark]{
+  --bg:#101317; --panel:#191d22; --ink:#eceef0; --dim:#949ba2; --line:#282e35;
+  --accent:#ff7a52; --accent-soft:#2a1a14; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+}
+@media (prefers-color-scheme:dark){
+  body:not([data-theme=light]){
+    --bg:#101317; --panel:#191d22; --ink:#eceef0; --dim:#949ba2; --line:#282e35;
+    --accent:#ff7a52; --accent-soft:#2a1a14; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif}
+.wrap{max-width:1120px;margin:0 auto;padding:26px 20px 60px}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+h1{font-size:20px;margin:0;letter-spacing:-.01em}
+header p{margin:0;color:var(--dim);font-size:13.5px}
+
+#drop{border:1.5px dashed var(--line);border-radius:12px;padding:26px;text-align:center;
+  background:var(--panel);transition:border-color .15s,background .15s;margin-bottom:16px}
+#drop.over{border-color:var(--accent);background:var(--accent-soft)}
+#drop.loaded{padding:12px 16px;text-align:left;display:flex;align-items:center;gap:12px}
+#drop.loaded .big{display:none}
+#drop .big{font-size:14.5px;color:var(--dim);margin-bottom:12px}
+#fileName{font:12.5px var(--mono);color:var(--accent);background:var(--accent-soft);padding:4px 9px;border-radius:6px}
+input[type=file]{display:none}
+
+button{font:inherit;font-weight:550;padding:8px 15px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);cursor:pointer;white-space:nowrap}
+button:hover{border-color:var(--dim)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.rec{background:#c62828;border-color:#c62828;color:#fff}
+
+#stage{position:relative;border-radius:14px;overflow:hidden;background:#dfe6ec;
+  box-shadow:var(--shadow);height:min(66vh,620px);height:min(66svh,620px);margin-bottom:10px}
+/* 세로 무대: 높이 기준으로 폭을 정하되, 좁은 화면에선 폭이 화면을 넘지 않게 잘라낸다 */
+#stage.vert{height:auto;aspect-ratio:9/16;margin-inline:auto;
+  width:min(100%,calc(min(80vh,880px)*9/16));width:min(100%,calc(min(80svh,880px)*9/16))}
+#map{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+#tip{position:absolute;pointer-events:none;transform:translate(-50%,-100%);
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;
+  box-shadow:var(--shadow);font:12px/1.5 var(--mono);max-width:320px;z-index:5}
+#tip b{display:block;font:600 12.5px/1.5 var(--mono);color:var(--ink)}
+#tip b span{color:var(--dim);font-weight:400}
+#tip>span{display:block;color:var(--dim)}
+#tip .pth{margin-top:3px;word-break:break-all;color:var(--dim);opacity:.8}
+#wheelHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+  padding:20px;background:rgba(18,20,23,.42);color:#fff;font-size:15px;font-weight:600;z-index:6;
+  opacity:0;transition:opacity .25s;pointer-events:none}
+#wheelHint.show{opacity:1}
+
+#timeline{width:100%;height:74px;display:block;cursor:ew-resize;margin-bottom:14px;touch-action:none}
+
+.bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.sep{width:1px;height:22px;background:var(--line)}
+label.opt{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--dim);cursor:pointer;white-space:nowrap}
+select,input[type=text]{font:13px inherit;padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel);color:var(--ink)}
+input[type=text]{font-family:var(--mono);font-size:11.5px;flex:1;min-width:200px}
+input[type=range]{width:110px;accent-color:var(--accent)}
+input[type=checkbox]{accent-color:var(--accent)}
+input[type=color]{width:32px;height:28px;padding:2px;border:1px solid var(--line);border-radius:7px;background:var(--panel);cursor:pointer}
+
+#stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:14px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.st b{display:block;font:600 18px/1.35 var(--mono);letter-spacing:-.02em}
+.st span{font-size:11.5px;color:var(--dim)}
+.st:first-child b{color:var(--accent);font-size:21px}
+
+.status{font-size:13px;color:var(--dim);background:var(--panel);border-left:3px solid var(--accent);
+  padding:9px 13px;border-radius:0 8px 8px 0;margin-bottom:14px}
+.status.bad{border-left-color:#c62828;color:var(--ink)}
+.report{font-size:12.5px;color:var(--dim);background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;padding:9px 13px;margin-bottom:14px;line-height:1.9}
+.report b{color:var(--accent);font:600 13px var(--mono)}
+.report code{font:11.5px var(--mono);background:var(--bg);padding:2px 6px;border-radius:5px;
+  border:1px solid var(--line);color:var(--ink)}
+.report .skip{color:var(--warn,#8a5a00)}
+.hide{display:none}
+details{margin-top:12px}
+summary{font-size:12.5px;color:var(--dim);cursor:pointer}
+details .bar{margin:10px 0 0}
+.note{font-size:12.5px;color:var(--dim);margin-top:12px;line-height:1.7}
+
+/* ============================ 반응형: 좁은 화면 (폰) ============================ */
+@media (max-width:640px){
+  .wrap{padding:14px 12px 44px}
+  h1{font-size:18px}
+  header{gap:8px;margin-bottom:12px}
+  header p{font-size:12.5px}
+  #drop{padding:18px 14px}
+  #drop.loaded{flex-wrap:wrap;gap:8px}
+
+  .bar{gap:8px}
+  .sep{display:none}
+  .bar select{flex:1 1 45%;min-width:0}
+  /* 슬라이더 줄은 한 줄을 통째로 쓰고, 체크박스는 두 개씩 나란히 */
+  label.opt{flex:1 1 100%;justify-content:space-between}
+  label.opt:has(input[type=checkbox]){flex:1 1 46%;justify-content:flex-start}
+  input[type=range]{flex:1;width:auto;min-width:80px}
+  .bar button{flex:1 1 auto;padding:10px 12px}
+  #colorReset{flex:0 0 auto}
+  /* iOS 사파리는 글자가 16px보다 작은 입력에 포커스하면 화면을 강제 확대한다 */
+  select,input[type=text]{font-size:16px}
+
+  #timeline{height:60px;margin-bottom:10px}
+  #stats{padding:14px 16px;gap:10px}
+  .st b{font-size:16px}
+  .st:first-child b{font-size:18px}
+  #tip{max-width:min(240px,72vw)}
+}
