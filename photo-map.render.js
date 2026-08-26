@@ -1,9 +1,17 @@
 /* ============================ 타일 레이어 ============================ */
 // CARTO 타일은 키 없는 요청에 "API KEY REQUIRED" 워터마크를 씌우므로 뺐다.
-// 남은 온라인 배경은 OSM 하나. 새 소스를 넣을 때는 저작자 표시(attr)를 반드시 채운다.
+// Stadia 는 도메인 인증이라 URL 에 키를 넣지 않는다 — 대시보드에 등록한 도메인에서만 응답한다.
+// 새 소스를 넣을 때는 저작자 표시(attr)를 반드시 채운다. 영상에 그대로 찍히는 값이다.
 const TILE_SOURCES = {
-  osm: { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-         sub: '', max: 19, attr: '© OpenStreetMap contributors' },
+  smooth:     { url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png',
+                sub: '', max: 20, attr: '© Stadia Maps © OpenMapTiles © OpenStreetMap' },
+  smoothdark: { url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png',
+                sub: '', max: 20, attr: '© Stadia Maps © OpenMapTiles © OpenStreetMap' },
+  // 수채화는 Stamen 원본 래스터라 z16 까지만 있다. 그 위는 코드가 알아서 늘려 그린다.
+  watercolor: { url: 'https://tiles.stadiamaps.com/tiles/stamen_watercolor/{z}/{x}/{y}.jpg',
+                sub: '', max: 16, attr: '© Stadia Maps © Stamen Design © OpenStreetMap' },
+  osm:        { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                sub: '', max: 19, attr: '© OpenStreetMap contributors' },
 };
 const DEFAULT_ATTR = '© OpenStreetMap contributors';
 

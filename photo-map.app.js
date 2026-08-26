@@ -674,7 +674,10 @@ $('customUrl').oninput = e => {
 $('customAttr').oninput = () => { updateBaseNote(); needsDraw = true; };
 
 /* 지도 배경을 고를 때마다, 그 선택이 무엇을 밖으로 내보내는지 그 자리에서 알려준다. */
-const BASE_PROVIDER = { osm: 'OpenStreetMap' };
+const BASE_PROVIDER = { smooth: 'Stadia Maps', smoothdark: 'Stadia Maps',
+                        watercolor: 'Stadia Maps', osm: 'OpenStreetMap' };
+// 밝은/어두운 짝 — 테마를 바꾸면 이 둘 사이에서만 따라 바뀐다 (오프라인은 절대 건드리지 않는다)
+const THEME_PAIR = { smooth: 'smoothdark', smoothdark: 'smooth' };
 function updateBaseNote() {
   const el = $('baseNote');
   if (!el) return;
@@ -745,6 +748,15 @@ $('theme').onchange = e => {
   opts.dark = e.target.value === 'dark';
   document.body.dataset.theme = e.target.value;
   if (!opts.routeColor) $('routeColor').value = THEMES[opts.dark ? 'dark' : 'light'].route;
+  // 밝은 지도를 쓰던 중이라면 어두운 짝으로 (그 반대도). 그 외 배경은 그대로 둔다.
+  if (THEME_PAIR[opts.base]) {
+    const want = opts.dark ? 'smoothdark' : 'smooth';
+    if (want !== opts.base) {
+      opts.base = want; $('base').value = want;
+      tiles.setSource(want, $('customUrl').value.trim());
+      updateBaseNote();
+    }
+  }
   needsDraw = true;
 };
 $('vertical').onchange = e => {
