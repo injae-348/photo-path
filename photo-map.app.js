@@ -9,6 +9,7 @@ let view = { cx: 0.5, cy: 0.5, z: 1.6 };
 let progress = 1, playing = false, recording = false, hoverIdx = -1, pinIdx = -1;
 let lastFrame = 0, phase = 0, needsDraw = true, buckets = null;
 let sched = null, fitZ = 2, outro = null, intro = null;
+let rawRecords = null, yearMin = 0, yearMax = 0, lastYears = null;
 
 const opts = {
   base: 'none', custom: '', mode: 'smooth', emph: 1.5, camera: 'auto',
@@ -65,6 +66,8 @@ function loadText(text, name) {
     return;
   }
   showReport(got.report);
+  rawRecords = got.records;
+  buildYearOptions();
   data = d;
   buckets = makeBuckets(d);
   sched = buildSchedule(d, opts.mode, opts.emph);
@@ -184,6 +187,72 @@ function snapCamera() {
   if (!data || opts.camera !== 'auto') return;
   const v = cameraTarget(headAt(data, sched, progress));
   view.cx = v.cx; view.cy = v.cy; view.z = v.z;
+}
+
+/* ============================ 연도 필터 ============================
+ * 여러 해가 섞인 파일에서 "올해만" 또는 "그 여행이 있던 해만" 보고 싶을 때가 많다.
+ * 원본 레코드를 그대로 들고 있다가, 고른 구간만 다시 준비해서 지도·통계·타임라인·
+ * 추천 길이를 한꺼번에 새로 잡는다.
+ */
+function recYear(r) {
+  const s = r.taken || r.takenUtc || r.gpsUtc;
+  if (typeof s === 'string') { const m = /^(\d{4})/.exec(s); if (m) return +m[1]; }
+  const t = timeOf(r);
+  return isNaN(t) ? NaN : new Date(t).getUTCFullYear();
+}
+function buildYearOptions() {
+  const seen = new Set();
+  for (const r of rawRecords) { const y = recYear(r); if (!isNaN(y)) seen.add(y); }
+  const years = [...seen].sort((a, b) => a - b);
+  if (years.length < 2) {                       // 한 해뿐이면 고를 것이 없다
+    $('yearBar').classList.add('hide');
+    yearMin = yearMax = years[0] || 0; lastYears = null;
+    return;
+  }
+  yearMin = years[0]; yearMax = years[years.length - 1];
+  const opts_ = years.map(y => `<option value="${y}">${y}년</option>`).join('');
+  $('yearFrom').innerHTML = opts_; $('yearTo').innerHTML = opts_;
+  $('yearFrom').value = yearMin; $('yearTo').value = yearMax;
+  lastYears = [yearMin, yearMax];
+  $('yearBar').classList.remove('hide');
+  updateYearInfo(rawRecords.length);
+}
+function updateYearInfo(shown) {
+  const a = +$('yearFrom').value, b = +$('yearTo').value;
+  const whole = a === yearMin && b === yearMax;
+  $('yearAll').classList.toggle('hide', whole);
+  $('yearInfo').textContent = whole
+    ? `전체 기간 · 사진 ${shown.toLocaleString('ko-KR')}장`
+    : `사진 ${shown.toLocaleString('ko-KR')}장 (전체 ${rawRecords.length.toLocaleString('ko-KR')}장 중)`;
+}
+function applyYearFilter() {
+  if (!rawRecords || !lastYears) return;
+  let a = +$('yearFrom').value, b = +$('yearTo').value;
+  if (a > b) {                                  // 뒤집어 고르면 조용히 바로잡는다
+    if (a !== lastYears[0]) { b = a; $('yearTo').value = b; }
+    else { a = b; $('yearFrom').value = a; }
+  }
+  const recs = (a === yearMin && b === yearMax)
+    ? rawRecords
+    : rawRecords.filter(r => { const y = recYear(r); return y >= a && y <= b; });
+  const d = prepare(recs);
+  if (!d.pts.length) {                          // 빈 화면으로 만들지 않고 이전 선택으로 되돌린다
+    $('yearFrom').value = lastYears[0]; $('yearTo').value = lastYears[1];
+    setStatus(`${a}${a === b ? '' : '–' + b}년에는 지도에 표시할 사진이 없습니다.`, true);
+    return;
+  }
+  lastYears = [a, b];
+  data = d; buckets = makeBuckets(d); sched = buildSchedule(d, opts.mode, opts.emph);
+  hoverIdx = pinIdx = -1; $('tip').classList.add('hide');
+  playing = false; outro = null; intro = null; progress = 1;
+  $('play').textContent = '▶ 재생';
+  fitAll();
+  applySuggestedDuration();
+  renderStats();
+  updateYearInfo(d.pts.length);
+  setStatus(a === yearMin && b === yearMax ? '' :
+    `${a}${a === b ? '' : '–' + b}년 사진 ${d.pts.length.toLocaleString('ko-KR')}장만 그립니다. 영상 길이도 그에 맞춰 ${opts.duration}초로 잡았습니다.`);
+  needsDraw = true;
 }
 
 /* ============================ 시작 줌인 ============================
@@ -566,6 +635,12 @@ $('stop').onclick = () => {
   fitAll();
 };
 $('fit').onclick = fitAll;
+$('yearFrom').onchange = applyYearFilter;
+$('yearTo').onchange = applyYearFilter;
+$('yearAll').onclick = () => {
+  $('yearFrom').value = yearMin; $('yearTo').value = yearMax;
+  applyYearFilter();
+};
 $('base').onchange = e => {
   opts.base = e.target.value;
   if (opts.base !== 'none') tiles.setSource(opts.base, $('customUrl').value.trim());
@@ -605,7 +680,10 @@ function updateBaseNote() {
     '재생 중에는 화면이 경로를 따라 움직이니, 이동한 지역의 대략적인 윤곽까지 남을 수 있습니다. ' +
     '사진 파일·좌표값·촬영 시각·파일 이름은 보내지 않습니다. ' +
     (custom ? '이 서버를 믿을 수 있는지는 직접 확인하세요. ' : '') +
-    '신경 쓰이면 <b>내장 벡터 (오프라인)</b>로 되돌리면 됩니다.';
+    '신경 쓰이면 <b>내장 벡터 (오프라인)</b>로 되돌리면 됩니다.' +
+    '<span class="warm"><b>영상을 저장하기 전에 ▶ 재생을 한 번 돌려 주세요.</b> ' +
+    '지도 그림은 화면에 보이는 만큼 그때그때 받아오기 때문에, 한 번 훑어 두지 않으면 ' +
+    '영상 중간에 지도가 비어 보일 수 있습니다.</span>';
 }
 $('mode').onchange = e => {
   opts.mode = e.target.value;

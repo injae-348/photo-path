@@ -74,6 +74,16 @@
 
     <canvas id="timeline"></canvas>
 
+    <div class="bar hide" id="yearBar">
+      <label class="opt">연도
+        <select id="yearFrom" title="시작 연도"></select>
+        <span style="color:var(--dim)">–</span>
+        <select id="yearTo" title="끝 연도"></select>
+      </label>
+      <button id="yearAll" class="hide" title="전체 기간으로 되돌립니다">전체 기간</button>
+      <span id="yearInfo" style="color:var(--dim);font-size:12.5px"></span>
+    </div>
+
     <div class="bar">
       <button id="play" class="primary">▶ 재생</button>
       <button id="stop" title="재생을 멈추고 처음 화면으로 돌아갑니다">■ 정지</button>

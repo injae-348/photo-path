@@ -50,6 +50,8 @@ th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;lett
 .note{font-size:13px;color:var(--dim);margin-top:12px}
 .note code{font:12px var(--mono);background:var(--bg);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
 .hide{display:none}
+.yin{width:78px;font:12.5px var(--mono);padding:6px 8px;border:1px solid var(--line);
+  border-radius:7px;background:var(--panel);color:var(--ink);text-align:center}
 .gobtn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;
   font-size:13.5px;font-weight:600;padding:10px 18px;border-radius:9px;white-space:nowrap}
 .gobtn:hover{opacity:.9;text-decoration:none}
@@ -57,6 +59,7 @@ th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;lett
   align-items:center;justify-content:center;flex-wrap:wrap;padding:12px 18px;
   background:var(--panel);border-top:1px solid var(--line);box-shadow:0 -2px 16px rgba(0,0,0,.07)}
 .gobar .txt{font-size:13px;color:var(--dim)}
+.gobar.hide{display:none}       /* .hide 보다 뒤에 오므로 display를 다시 눌러줘야 한다 */
 .gobar .txt b{color:var(--ink);font-weight:600}
 @media (max-width:560px){.gobar{gap:9px;padding:10px 14px}.gobar .txt{font-size:12px}}
 body.hasgo .wrap{padding-bottom:130px}
@@ -129,9 +132,16 @@ a:hover{text-decoration:underline}
       <label class="opt">동시 처리 <input id="workers" type="range" min="1" max="16" value="6">
         <b id="workersN" style="font:600 13px var(--mono);color:var(--ink)">6</b></label>
       <label class="opt"><input id="wantModel" type="checkbox" checked> 카메라 모델 포함</label>
+      <label class="opt">연도
+        <input id="yFrom" class="yin" type="number" min="1900" max="2100" step="1" placeholder="처음">
+        <span>–</span>
+        <input id="yTo" class="yin" type="number" min="1900" max="2100" step="1" placeholder="끝">
+      </label>
     </div>
     <div class="note" style="margin-top:10px">위도·경도가 없는 사진은 결과에서 <b>항상 제외</b>됩니다.
-      제외된 사진은 아래 <b>제외된 사진</b> 목록에서 확인할 수 있습니다.</div>
+      <b>연도</b>를 비워 두면 전체 기간을 훑습니다. 한쪽만 채우면 그해부터(또는 그해까지)이고,
+      범위를 정하면 촬영 연도가 그 밖인 사진은 결과에서 빠집니다.
+      제외된 사진은 아래 <b>제외된 사진</b> 목록에서 사유와 함께 확인할 수 있습니다.</div>
     <div style="margin-top:14px">
       <label class="opt" style="display:block;margin-bottom:6px">확장자</label>
       <input id="exts" type="text" value="jpg,jpeg,jpe,png,heic,heif,avif,webp,tif,tiff,dng,cr2,cr3,nef,arw,rw2,orf,raf">
@@ -153,6 +163,7 @@ a:hover{text-decoration:underline}
       <div class="stat"><b id="sTime">0</b><span>시간만</span></div>
       <div class="stat warn"><b id="sNone">0</b><span>메타 없음</span></div>
       <div class="stat err"><b id="sErr">0</b><span>오류</span></div>
+      <div class="stat warn"><b id="sYear">0</b><span>연도 밖</span></div>
       <div class="stat warn"><b id="sSkip">0</b><span>제외됨</span></div>
       <div class="stat"><b id="sRate">–</b><span>장/초</span></div>
       <div class="stat"><b id="sEta">–</b><span>남은 시간</span></div>
@@ -578,6 +589,18 @@ const HAS_FS = typeof window.showDirectoryPicker === 'function' && typeof window
 let dirHandle = null, fileList = null, running = false, abort = false;
 let stats, errors = [], previewRows = 0, memResults = null;
 let excluded = [], excludedRows = 0, excludedTotal = 0;
+
+/* 촬영 연도. 카메라가 기록한 로컬 시각을 먼저 본다 — 사람이 "몇 년도 사진"이라고
+   말할 때 뜻하는 건 UTC가 아니라 찍은 그 자리의 날짜다. */
+function photoYear(r) {
+  const s = r.taken || r.gpsUtc;
+  const m = typeof s === 'string' && /^(\d{4})/.exec(s);
+  return m ? +m[1] : NaN;
+}
+function inYearRange(r, lo, hi) {
+  const y = photoYear(r);
+  return !isNaN(y) && y >= lo && y <= hi;   // 연도를 모르는 사진은 범위를 걸었을 때 제외한다
+}
 const EX_KEEP = 5000;   // 목록으로 보관할 최대 건수 (메모리 상한)
 const EX_ROWS = 200;    // 화면에 그릴 최대 행 수
 
@@ -676,10 +699,17 @@ async function start(){
   $('log').textContent = ''; $('log').classList.add('hide');
   $('preview').tBodies[0].innerHTML = ''; $('previewCard').classList.add('hide');
   $('excluded').tBodies[0].innerHTML = ''; $('excludedCard').classList.add('hide');
-  stats = { scanned: 0, done: 0, gps: 0, timeOnly: 0, none: 0, err: 0, read: 0, t0: performance.now() };
+  stats = { scanned: 0, done: 0, gps: 0, timeOnly: 0, none: 0, err: 0, outYear: 0, read: 0, t0: performance.now() };
 
   const exts = new Set($('exts').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
   const wantModel = $('wantModel').checked;
+  // 연도 범위 — 비워 두면 제한 없음. 뒤집어 넣어도 알아서 바로잡는다.
+  let yLo = parseInt($('yFrom').value, 10), yHi = parseInt($('yTo').value, 10);
+  if (isFinite(yLo) && isFinite(yHi) && yLo > yHi) { const t = yLo; yLo = yHi; yHi = t;
+    $('yFrom').value = yLo; $('yTo').value = yHi; }
+  const yearLimited = isFinite(yLo) || isFinite(yHi);
+  if (!isFinite(yLo)) yLo = -Infinity;
+  if (!isFinite(yHi)) yHi = Infinity;
   const N = parseInt($('workers').value, 10);
 
   // --- output target ---
@@ -726,6 +756,12 @@ async function start(){
     else if (r.lat === undefined) {
       stats.timeOnly++;
       addExcluded(path, '좌표 없음 (촬영일시만 있음)', r.taken || r.gpsUtc || '');
+    }
+    else if (yearLimited && !inYearRange(r, yLo, yHi)) {
+      stats.outYear++;
+      const y = photoYear(r);
+      addExcluded(path, '연도 범위 밖' + (isNaN(y) ? ' (촬영일시 없음)' : ' (' + y + '년)'),
+                  r.taken || r.gpsUtc || '');
     }
     else {
       stats.gps++;
@@ -824,7 +860,8 @@ async function start(){
   if (previewRows) $('previewCard').classList.remove('hide');
   if (stats.gps) { $('mapRow').classList.remove('hide'); $('goBar').classList.remove('hide'); document.body.classList.add('hasgo'); }
   finishExcludedUI();
-  logLine('저장 ' + fmt(stats.gps) + '장 · 제외 ' + fmt(excludedTotal) + '장');
+  logLine('저장 ' + fmt(stats.gps) + '장 · 제외 ' + fmt(excludedTotal) + '장'
+    + (stats.outYear ? ' (연도 범위 밖 ' + fmt(stats.outYear) + '장 포함)' : ''));
   logLine('총 ' + fmt(stats.done) + '장 · GPS ' + fmt(stats.gps) + ' · 시간만 ' + fmt(stats.timeOnly) +
           ' · 메타없음 ' + fmt(stats.none) + ' · 오류 ' + fmt(stats.err) +
           ' · 실제 읽은 용량 ' + bytes(stats.read) + ' · ' + (stats.done / secs).toFixed(0) + '장/초');
@@ -889,6 +926,7 @@ function paint(){
   $('sTime').textContent = fmt(stats.timeOnly);
   $('sNone').textContent = fmt(stats.none);
   $('sErr').textContent = fmt(stats.err);
+  $('sYear').textContent = fmt(stats.outYear);
   $('sSkip').textContent = fmt(excludedTotal);
   $('sRate').textContent = rate ? rate.toFixed(0) : '–';
   $('sEta').textContent = rate > 1 ? hhmmss((stats.scanned - stats.done) / rate) : '–';
