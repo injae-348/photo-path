@@ -23,6 +23,11 @@
     <p>사진 속 위치 기록을 시간 순서대로 지도에 그립니다.</p>
   </header>
 
+  <div class="privacy-note" role="note">
+    <b>개인정보·외부 통신 안내</b>
+    <p>사진과 JSON은 브라우저 안에서만 처리되며 서버에 업로드되지 않습니다. Vercel에는 접속·성능 정보가 전송될 수 있으며, 온라인 지도(CARTO·OpenStreetMap)를 사용하면 표시 지역을 추정할 수 있는 타일 요청도 해당 지도 서버로 전송됩니다.</p>
+  </div>
+
   <div id="drop">
     <div class="big">JSON 파일을 여기에 끌어다 놓으세요<br><span style="font-size:12.5px">GeoJSON · 구글 위치기록 · 구글 포토 takeout · NDJSON · CSV도 그대로 읽습니다</span><br><a href="photo-geo-extractor.html">아직 JSON 파일이 없다면 — 사진 폴더에서 추출하기 →</a></div>
     <button id="dropBtn" class="primary">파일 선택</button>
