@@ -1,6 +1,25 @@
-# 추출 결과에는 실제 촬영 위치가 담긴다. 저장소에 올리지 않는다.
-photos-geo.json
+# --- 추출 결과 · 위치 데이터 -------------------------------------------
+# 이 파일들에는 실제 촬영 좌표가 그대로 담긴다. 저장소에 올리지 않는다.
+*.json
+!package.json
+!package-lock.json
+!vercel.json
+!tsconfig.json
 photos-excluded.tsv
 photos-errors.ndjson
-get-temp.json
-*.local.json
+
+# --- 만들어진 결과물 ---------------------------------------------------
+photo-map.mp4
+photo-map.webm
+photo-map.png
+
+# --- OS · 편집기 -------------------------------------------------------
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
