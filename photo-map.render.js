@@ -7,9 +7,6 @@ const TILE_SOURCES = {
                 sub: '', max: 20, attr: '© Stadia Maps © OpenMapTiles © OpenStreetMap' },
   smoothdark: { url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png',
                 sub: '', max: 20, attr: '© Stadia Maps © OpenMapTiles © OpenStreetMap' },
-  // 수채화는 Stamen 원본 래스터라 z16 까지만 있다. 그 위는 코드가 알아서 늘려 그린다.
-  watercolor: { url: 'https://tiles.stadiamaps.com/tiles/stamen_watercolor/{z}/{x}/{y}.jpg',
-                sub: '', max: 16, attr: '© Stadia Maps © Stamen Design © OpenStreetMap' },
   osm:        { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 sub: '', max: 19, attr: '© OpenStreetMap contributors' },
 };

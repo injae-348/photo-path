@@ -122,20 +122,13 @@
     <div class="bar">
       <select id="base" title="지도 배경">
         <option value="none" selected>내장 벡터 (오프라인)</option>
+        <option value="nonedark">내장 벡터 · 어두운 (오프라인)</option>
         <option value="smooth">밝은 지도 (온라인)</option>
         <option value="smoothdark">어두운 지도 (온라인)</option>
-        <option value="watercolor">수채화 지도 (온라인)</option>
         <option value="osm">OpenStreetMap (온라인)</option>
       </select>
-      <select id="theme" title="테마">
-        <option value="light">라이트</option>
-        <option value="dark">다크</option>
-      </select>
       <label class="opt">경로 색 <input id="routeColor" type="color" value="#e8542f"></label>
-      <button id="colorReset" title="테마 기본색으로 되돌리기" style="padding:8px 10px">↺</button>
-      <label class="opt"><input id="glow" type="checkbox" checked> 경로 글로우</label>
-      <label class="opt"><input id="curve" type="checkbox" checked> 부드러운 선</label>
-      <label class="opt"><input id="labels" type="checkbox" checked> 도시 이름</label>
+      <button id="colorReset" title="기본색으로 되돌리기" style="padding:8px 10px">↺</button>
       <div class="sep"></div>
       <label class="opt"><input id="vertical" type="checkbox" checked> 세로 9:16</label>
       <button id="warm" class="hide" title="영상이 지나갈 구간의 지도를 미리 받아둡니다">지도 미리 받기</button>

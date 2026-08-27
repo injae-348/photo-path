@@ -14,10 +14,14 @@ let rawRecords = null, dataRange = null, lastRange = null;
 
 const opts = {
   base: 'none', custom: '', mode: 'smooth', emph: 1.5, camera: 'auto',
-  vertical: true, duration: 12, glow: true, dark: false, labels: true, zoom: 1,
-  curve: true, routeColor: '',
+  vertical: true, duration: 12, dark: false, zoom: 1, routeColor: '',
+  // 아래 셋은 고정값이다. 켜고 끌 이유가 없어서 화면에서 뺐다 (그림 코드는 그대로 받는다).
+  glow: true, curve: true, labels: true,
 };
 const MODE_LABEL = { smooth: '이동 거리에 맞춰', even: '사진 순서대로', real: '실제 시간 흐름' };
+// 오프라인 배경은 밝은·어두운 두 가지다. 둘 다 지도 그림이 프로그램 안에 들어 있어
+// 인터넷을 쓰지 않는다 — 타일을 받지도, 미리 받아두지도 않는다.
+const offline = b => b === 'none' || b === 'nonedark';
 
 const THEMES = {
   light: {
@@ -333,7 +337,7 @@ function viewAt(p) {
   return opts.camera === 'auto' ? cameraTarget(h, p) : { cx: h.x, cy: h.y, z: view.z };
 }
 function prefetchAhead(dt) {
-  if (opts.base === 'none' || !data) return;
+  if (offline(opts.base) || !data) return;
   // 이미 통째로 받아뒀다면 앞당겨 받을 필요가 없다. 오히려 계획에 없는 타일을
   // 끌어와 캐시를 밀어내므로 받아둔 것이 도로 쫓겨난다.
   if (warmedKey === warmKey()) return;
@@ -356,7 +360,7 @@ let warming = false, warmedKey = '';
 const warmKey = () => [opts.base, opts.duration, opts.mode, opts.emph, opts.camera, opts.zoom,
                        opts.vertical, W, H, data ? data.pts.length : 0].join('|');
 function planTiles() {
-  if (!data || !sched || opts.base === 'none') return [];
+  if (!data || !sched || offline(opts.base)) return [];
   const seen = new Set(), out = [];
   const tst = {};                       // 타일 단계 선택 상태 — 재생과 같은 순서로 굴린다
   const add = v => {
@@ -431,7 +435,7 @@ function warmTiles(after) {
   tick();
 }
 function updateWarmUI() {
-  const on = opts.base !== 'none';
+  const on = !offline(opts.base);
   $('warm').classList.toggle('hide', !on);
   if (!on) { $('warmN').textContent = ''; warming = false; warmedKey = ''; }
 }
@@ -470,7 +474,7 @@ function startIntro() {
   intro = { t: 0, from, to,
             dur: Math.min(INTRO.maxSec, INTRO.minSec + Math.abs(to.z - from.z) * INTRO.perStop) };
   // 인트로가 도는 1.6~4초 동안 도착지 타일을 미리 받아둔다
-  if (opts.base !== 'none') { tiles.prefetch(from, W, H); tiles.prefetch(to, W, H); }
+  if (!offline(opts.base)) { tiles.prefetch(from, W, H); tiles.prefetch(to, W, H); }
   needsDraw = true;
 }
 
@@ -554,7 +558,7 @@ function frame(ts) {
         const wide = viewFor(...allBounds(), 0.12);
         outro = { t: 0, dur: zoomSec(view.z - wide.z, 1.8),
                   from: { cx: view.cx, cy: view.cy, z: view.z }, to: wide };
-        if (opts.base !== 'none') tiles.prefetch(outro.to, W, H);
+        if (!offline(opts.base)) tiles.prefetch(outro.to, W, H);
       } else if (recording) stopRecording();
     }
     needsDraw = true;
@@ -595,7 +599,7 @@ function draw() {
   const col = C(), o = drawScale();
   ctx.fillStyle = col.sea; ctx.fillRect(0, 0, W, H);
 
-  if (opts.base === 'none') drawLand(ctx, view, W, H, col.land, col.landLine);
+  if (offline(opts.base)) drawLand(ctx, view, W, H, col.land, col.landLine);
   else {
     drawLand(ctx, view, W, H, col.land, 'transparent');   // 타일 도착 전 밑그림
     tiles.draw(ctx, view, W, H);
@@ -623,7 +627,7 @@ function draw() {
     km: fmtKm(h.km),
     foot: `사진 ${Math.min(data.pts.length, h.i + 1 + Math.round(h.f)).toLocaleString('ko-KR')} / ${data.pts.length.toLocaleString('ko-KR')}장 · 방문지 ${data.cities.filter(c => c.t0 <= h.t).length}곳`,
     // 저작자 표시는 어떤 배경에서도 비우지 않는다. 직접 지정한 서버도 대개 OSM 데이터를 쓴다.
-    attr: opts.base === 'none' ? 'Natural Earth'
+    attr: offline(opts.base) ? 'Natural Earth'
         : (tiles.custom ? ($('customAttr').value.trim() || DEFAULT_ATTR) : tiles.src.attr),
     p: progress,
   }, col, o);
@@ -833,7 +837,8 @@ $('yearChips').onclick = e => {
 };
 $('base').onchange = e => {
   opts.base = e.target.value;
-  if (opts.base !== 'none') {
+  if (BASE_DARK[opts.base] !== undefined) setTheme(BASE_DARK[opts.base]);
+  if (!offline(opts.base)) {
     tiles.setSource(opts.base, $('customUrl').value.trim());
     tiles.prefetch(view, W, H);                       // 지금 화면
     if (data) tiles.prefetch(viewFor(...allBounds(), 0.12), W, H);   // 전체 경로 화면
@@ -849,10 +854,10 @@ $('customUrl').oninput = e => {
 $('customAttr').oninput = () => { updateBaseNote(); needsDraw = true; };
 
 /* 지도 배경을 고를 때마다, 그 선택이 무엇을 밖으로 내보내는지 그 자리에서 알려준다. */
-const BASE_PROVIDER = { smooth: 'Stadia Maps', smoothdark: 'Stadia Maps',
-                        watercolor: 'Stadia Maps', osm: 'OpenStreetMap' };
-// 밝은/어두운 짝 — 테마를 바꾸면 이 둘 사이에서만 따라 바뀐다 (오프라인은 절대 건드리지 않는다)
-const THEME_PAIR = { smooth: 'smoothdark', smoothdark: 'smooth' };
+const BASE_PROVIDER = { smooth: 'Stadia Maps', smoothdark: 'Stadia Maps', osm: 'OpenStreetMap' };
+// 밝은/어두운 지도를 고르는 것이 곧 테마를 고르는 것이다. 따로 두면 서로 어긋나기만 한다.
+// 목록에 없는 배경(OSM·직접 지정)은 지금 테마를 그대로 쓴다.
+const BASE_DARK = { none: false, nonedark: true, smooth: false, smoothdark: true };
 function updateBaseNote() {
   const el = $('baseNote');
   if (!el) return;
@@ -860,7 +865,7 @@ function updateBaseNote() {
   let host = '';
   if (custom) { try { host = new URL(custom.replace(/\{[^}]*\}/g, '0')).hostname; } catch (e) { host = ''; } }
 
-  if (opts.base === 'none') {
+  if (offline(opts.base)) {
     el.className = 'basenote off';
     el.innerHTML = custom
       ? '<b>지금은 지도를 인터넷에서 받아오지 않습니다.</b> 직접 지정한 서버로도 요청하지 않아요. ' +
@@ -905,15 +910,19 @@ $('zoom').oninput = e => {
   $('zoomN').textContent = (x < 10 ? x.toFixed(1).replace('.0', '') : Math.round(x)) + '배';
   snapCamera(); needsDraw = true;
 };
-$('glow').onchange = e => { opts.glow = e.target.checked; needsDraw = true; };
-$('curve').onchange = e => { opts.curve = e.target.checked; needsDraw = true; };
 $('routeColor').oninput = e => { opts.routeColor = e.target.value; needsDraw = true; };
 $('colorReset').onclick = () => {
   opts.routeColor = '';
   $('routeColor').value = THEMES[opts.dark ? 'dark' : 'light'].route;
   needsDraw = true;
 };
-$('labels').onchange = e => { opts.labels = e.target.checked; needsDraw = true; };
+// 밝게/어둡게 — 지도 배경을 고를 때와 처음 켤 때(운영체제 설정) 한 곳으로 들어온다
+function setTheme(dark) {
+  opts.dark = !!dark;
+  document.body.dataset.theme = opts.dark ? 'dark' : 'light';
+  if (!opts.routeColor) $('routeColor').value = THEMES[opts.dark ? 'dark' : 'light'].route;
+  needsDraw = true;
+}
 $('dur').oninput = e => {
   opts.duration = +e.target.value; $('durN').textContent = e.target.value + '초';
   // 도착 직후 붙잡아 두는 시간은 초로 잡혀 있다 — 길이가 바뀌면 배분도 다시 해야 한다
@@ -922,21 +931,6 @@ $('dur').oninput = e => {
   needsDraw = true;
 };
 $('durAuto').onclick = applySuggestedDuration;
-$('theme').onchange = e => {
-  opts.dark = e.target.value === 'dark';
-  document.body.dataset.theme = e.target.value;
-  if (!opts.routeColor) $('routeColor').value = THEMES[opts.dark ? 'dark' : 'light'].route;
-  // 밝은 지도를 쓰던 중이라면 어두운 짝으로 (그 반대도). 그 외 배경은 그대로 둔다.
-  if (THEME_PAIR[opts.base]) {
-    const want = opts.dark ? 'smoothdark' : 'smooth';
-    if (want !== opts.base) {
-      opts.base = want; $('base').value = want;
-      tiles.setSource(want, $('customUrl').value.trim());
-      updateBaseNote();
-    }
-  }
-  needsDraw = true;
-};
 $('vertical').onchange = e => {
   opts.vertical = e.target.checked;
   $('stage').classList.toggle('vert', opts.vertical);
@@ -962,7 +956,7 @@ $('record').onclick = () => {
   if (!checkClean()) return;
   // 온라인 배경이면 영상이 지나갈 지도를 먼저 통째로 받아둔다.
   // 이미 받아둔 상태면 한 박자에 끝나고 바로 녹화로 넘어간다.
-  if (opts.base !== 'none' && !warming) { warmTiles(beginRecording); return; }
+  if (!offline(opts.base) && !warming) { warmTiles(beginRecording); return; }
   beginRecording();
 };
 function beginRecording() {
@@ -1004,15 +998,12 @@ function saveBlob(blob, name) {
 
 /* ============================ 시작 ============================ */
 tiles.onload = () => { needsDraw = true; };
-if (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) {
-  // 다크 테마라고 해서 온라인 지도로 바꾸지는 않는다. 기본은 언제나 오프라인 지도다.
-  opts.dark = true;
-  $('theme').value = 'dark';
-  $('routeColor').value = THEMES.dark.route;
-  document.body.dataset.theme = 'dark';
-}
+// 처음 한 번은 운영체제 설정을 따른다. 어둡다고 해서 온라인 지도로 바꾸지는 않는다 —
+// 기본은 언제나 오프라인 지도이고, 그중 어두운 쪽을 고를 뿐이다.
+if (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) opts.base = 'nonedark';
+setTheme(BASE_DARK[opts.base]);
 $('base').value = opts.base;
-if (opts.base !== 'none') tiles.setSource(opts.base, '');
+if (!offline(opts.base)) tiles.setSource(opts.base, '');
 updateBaseNote();
 updateWarmUI();
 resize();
