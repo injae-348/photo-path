@@ -14,7 +14,7 @@ let rawRecords = null, dataRange = null, lastRange = null;
 
 const opts = {
   base: 'none', custom: '', mode: 'smooth', emph: 1.5, camera: 'auto',
-  vertical: true, duration: 12, dark: false, zoom: 1, routeColor: '',
+  vertical: true, duration: 12, dark: false, zoom: 1, routeIdx: 0, routeColor: '',
   // 아래 셋은 고정값이다. 켜고 끌 이유가 없어서 화면에서 뺐다 (그림 코드는 그대로 받는다).
   glow: true, curve: true, labels: true,
 };
@@ -41,11 +41,22 @@ const THEMES = {
     barBg: 'rgba(255,255,255,.16)', darkScrim: true, labelHalo: 'rgba(10,14,18,.88)',
   },
 };
+/* 경로 색 — 배경 밝기에 어울리는 것만 내놓는다. 아무 색이나 고를 수 있게 하면
+ * 밝은 지도 위의 연노랑처럼 화면에서 사라지는 조합이 나온다.
+ * 첫 번째는 그 테마의 기본색이라, 되돌리기 버튼이 따로 필요 없다.
+ * 자리(routeIdx)를 기억하므로 배경을 바꿔도 고르던 색조가 그대로 이어진다. */
+const ROUTE_COLORS = {
+  light: [['#e8542f', '주황'], ['#1f6feb', '파랑'], ['#0d8a72', '청록'],
+          ['#c31f6d', '자홍'], ['#6d3fd4', '보라']],
+  dark:  [['#ff7a52', '주황'], ['#ffc84a', '노랑'], ['#38d9c8', '청록'],
+          ['#ff6bb3', '분홍'], ['#a98bff', '보라']],
+};
 const hexToRgba = (hex, a) => {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 };
-// routeColor가 비어 있으면 테마 기본색. 골랐으면 강조색 계열(선·점 테두리·현재 위치)만 그 색으로 바꾼다.
+// 고른 색은 강조색 계열(선·점 테두리·현재 위치)에만 쓴다. 바다·육지·글자는 테마 그대로다.
+// 첫 번째 견본은 테마 기본색과 같은 값이라 여기서 되돌아오는 색도 테마와 똑같다.
 const C = () => {
   const t = THEMES[opts.dark ? 'dark' : 'light'];
   const c = opts.routeColor;
@@ -910,17 +921,31 @@ $('zoom').oninput = e => {
   $('zoomN').textContent = (x < 10 ? x.toFixed(1).replace('.0', '') : Math.round(x)) + '배';
   snapCamera(); needsDraw = true;
 };
-$('routeColor').oninput = e => { opts.routeColor = e.target.value; needsDraw = true; };
-$('colorReset').onclick = () => {
-  opts.routeColor = '';
-  $('routeColor').value = THEMES[opts.dark ? 'dark' : 'light'].route;
-  needsDraw = true;
-};
+// 견본은 한 번만 만들고, 테마가 바뀌면 고른 자리는 그대로 둔 채 색만 갈아 끼운다
+function paintSwatches() {
+  const list = ROUTE_COLORS[opts.dark ? 'dark' : 'light'];
+  const box = $('routeColors');
+  if (!box.children.length) {
+    list.forEach((_, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'swatch';
+      b.onclick = () => { opts.routeIdx = i; paintSwatches(); needsDraw = true; };
+      box.appendChild(b);
+    });
+  }
+  opts.routeIdx = Math.max(0, Math.min(list.length - 1, opts.routeIdx));
+  opts.routeColor = list[opts.routeIdx][0];
+  [...box.children].forEach((b, i) => {
+    b.style.background = list[i][0];
+    b.title = list[i][1] + (i ? '' : ' (기본)');
+    b.setAttribute('aria-pressed', String(i === opts.routeIdx));
+  });
+}
 // 밝게/어둡게 — 지도 배경을 고를 때와 처음 켤 때(운영체제 설정) 한 곳으로 들어온다
 function setTheme(dark) {
   opts.dark = !!dark;
   document.body.dataset.theme = opts.dark ? 'dark' : 'light';
-  if (!opts.routeColor) $('routeColor').value = THEMES[opts.dark ? 'dark' : 'light'].route;
+  paintSwatches();
   needsDraw = true;
 }
 $('dur').oninput = e => {
