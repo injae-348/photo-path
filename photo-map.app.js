@@ -1,6 +1,7 @@
 /* ============================ 상태 ============================ */
 const $ = id => document.getElementById(id);
 const canvas = $('map'), ctx = canvas.getContext('2d', { alpha: false });
+ctx.imageSmoothingQuality = 'high';   // 축척이 어긋난 타일을 늘려 그릴 때 덜 거칠다
 const tl = $('timeline'), tctx = tl.getContext('2d');
 const tiles = new TileLayer();
 
@@ -70,7 +71,7 @@ function loadText(text, name) {
   buildRangeControls();
   data = d;
   buckets = makeBuckets(d);
-  sched = buildSchedule(d, opts.mode, opts.emph);
+  sched = buildSchedule(d, opts.mode, opts.emph, opts.duration);
   $('drop').classList.add('loaded');
   $('panel').classList.remove('hide');
   resize();
@@ -165,6 +166,7 @@ function fitAll() {
   const v = viewFor(...allBounds(), 0.12);
   fitZ = v.z;
   view.cx = v.cx; view.cy = v.cy; view.z = v.z;
+  restCamera(view);
   outro = null; intro = null;         // 이미 전체 뷰이므로 진행 중인 줌아웃·줌인은 무의미하다
   needsDraw = true;
 }
@@ -183,44 +185,61 @@ function cameraTarget(h, p = progress) {
   return viewFor(h.x + (b[0] - h.x) * k, h.y + (b[1] - h.y) * k,
                  h.x + (b[2] - h.x) * k, h.y + (b[3] - h.y) * k, CAM.pad, minZ);
 }
+/* 임계 감쇠 스프링 한 걸음(암시적 오일러 — dt 가 커져도 발산하지 않는다).
+ * 지수 보간은 목표가 바뀌는 순간 속도가 툭 끊긴다. 목표(=화면에 담을 범위)는 사진이
+ * 하나씩 들어오고 나가며 늘 조금씩 바뀌므로, 그 끊김이 매 프레임 덜컹거림으로 쌓인다.
+ * 스프링은 속도까지 이어지므로 목표가 계단처럼 변해도 화면은 매끄럽게 흐른다. */
+function spring(x, v, target, w, dt) {
+  const f = 1 + w * dt;
+  const nv = (v + w * w * dt * (target - x)) / (f * f);
+  return [x + nv * dt, nv];
+}
+const CAMS = {
+  pos: 8.5,      // 위치 스프링 세기 (클수록 바짝 따라붙는다)
+  zOut: 6.5,     // 축척이 빠질 때 — 지점이 달아나므로 조금 빠르게
+  zIn: 4.0,      // 축척이 들어갈 때 — 느긋해야 멀미가 없다
+  zRate: 4.5,    // 초당 최대 축척 변화. 타일 단계가 한꺼번에 여러 칸 넘어가면 깨져 보인다
+};
+
 /* 카메라를 한 걸음 움직인다. 재생 루프와 '미리 받기' 계획이 똑같은 식을 써야
    계획한 타일과 실제로 화면에 나오는 타일이 어긋나지 않는다. */
 function stepCamera(v, p, dt) {
   const h = headAt(data, sched, p);
   if (!h) return false;
-  // 위치는 빠르게, 축척은 느긋하게 따라간다. 줌이 출렁이면 멀미가 난다.
-  const kp = 1 - Math.pow(0.0016, dt);
+  v.vx = v.vx || 0; v.vy = v.vy || 0; v.vz = v.vz || 0;   // 스프링 속도 (없으면 정지 상태)
   if (opts.camera === 'auto') {
     const t = cameraTarget(h, p);
-    v.cx += (t.cx - v.cx) * kp;
-    v.cy += (t.cy - v.cy) * kp;
-    // 현재 지점을 화면 안에 두기 위한 축척 상한. 이걸 보간이 끝난 값에 곧바로
-    // min 으로 걸면, 지점이 앞서 나갈 때마다 축척이 프레임 단위로 튀어 화면이
-    // 흔들린다. 목표 쪽에 먼저 반영해서 기존 감속이 매끄럽게 흡수하게 한다.
+    // 현재 지점을 화면 안에 두기 위한 축척 상한. 보간이 끝난 값에 곧바로 min 을 걸면
+    // 지점이 앞서 나갈 때마다 축척이 프레임 단위로 튄다. 목표 쪽에 먼저 반영해서
+    // 스프링이 매끄럽게 흡수하게 한다.
+    let tz = t.z;
     const ax = Math.abs(h.x - v.cx), ay = Math.abs(h.y - v.cy);
-    let cap = Infinity;
-    if (ax > 1e-12) cap = Math.min(cap, Math.log2(0.34 * W / (256 * ax)));
-    if (ay > 1e-12) cap = Math.min(cap, Math.log2(0.30 * H / (256 * ay)));
+    if (ax > 1e-12) tz = Math.min(tz, Math.log2(0.34 * W / (256 * ax)));
+    if (ay > 1e-12) tz = Math.min(tz, Math.log2(0.30 * H / (256 * ay)));
+    [v.cx, v.vx] = spring(v.cx, v.vx, t.cx, CAMS.pos, dt);
+    [v.cy, v.vy] = spring(v.cy, v.vy, t.cy, CAMS.pos, dt);
     // 빠지는 건 빠르게, 들어가는 건 느긋하게.
     // 대칭으로 두면 화면이 아직 확대된 채로 지구 반대편까지 날아가 빈 화면이 된다.
-    const kz = 1 - Math.pow(t.z < v.z ? CAMZ.out : CAMZ.in, dt);
-    v.z += (t.z - v.z) * kz;
-    // 상한도 '즉시 자르기'가 아니라 빠른 감속으로 따라간다. 비행 구간에 들어서는
-    // 순간 지점이 화면 밖으로 확 벗어나면서 상한이 몇 단계씩 떨어지는데, 그때
-    // min 으로 곧바로 자르면 한 프레임에 축척이 통째로 바뀌어 화면이 크게 튄다.
-    if (v.z > cap) v.z += (cap - v.z) * (1 - Math.pow(0.02, dt));
-    v.z = Math.max(0.6, v.z);
+    let [z, vz] = spring(v.z, v.vz, tz, tz < v.z ? CAMS.zOut : CAMS.zIn, dt);
+    const lim = CAMS.zRate * dt;                 // 한 프레임에 넘을 수 있는 축척 폭
+    if (Math.abs(z - v.z) > lim) { z = v.z + (z > v.z ? lim : -lim); vz = (z - v.z) / dt; }
+    if (z < 0.6) { z = 0.6; vz = 0; }
+    v.z = z; v.vz = vz;
   } else {
-    v.cx += (h.x - v.cx) * kp;
-    v.cy += (h.y - v.cy) * kp;
+    [v.cx, v.vx] = spring(v.cx, v.vx, h.x, CAMS.pos, dt);
+    [v.cy, v.vy] = spring(v.cy, v.vy, h.y, CAMS.pos, dt);
   }
   return true;
 }
+
+// 카메라를 목표에 즉시 갖다 놓는다. 스프링 속도까지 지워야 다음 프레임에 튀지 않는다.
+function restCamera(v) { v.vx = v.vy = v.vz = 0; }
 
 function snapCamera() {
   if (!data || opts.camera !== 'auto') return;
   const v = cameraTarget(headAt(data, sched, progress));
   view.cx = v.cx; view.cy = v.cy; view.z = v.z;
+  restCamera(view);
 }
 
 /* ============================ 기간 필터 ============================
@@ -289,7 +308,7 @@ function applyRangeFilter() {
     return;
   }
   lastRange = [a, b];
-  data = d; buckets = makeBuckets(d); sched = buildSchedule(d, opts.mode, opts.emph);
+  data = d; buckets = makeBuckets(d); sched = buildSchedule(d, opts.mode, opts.emph, opts.duration);
   hoverIdx = pinIdx = -1; $('tip').classList.add('hide');
   playing = false; outro = null; intro = null; progress = 1;
   $('play').textContent = '▶ 재생';
@@ -339,8 +358,9 @@ const warmKey = () => [opts.base, opts.duration, opts.mode, opts.emph, opts.came
 function planTiles() {
   if (!data || !sched || opts.base === 'none') return [];
   const seen = new Set(), out = [];
+  const tst = {};                       // 타일 단계 선택 상태 — 재생과 같은 순서로 굴린다
   const add = v => {
-    for (const t of tiles.enumerate(v, W, H)) {
+    for (const t of tiles.enumerate(v, W, H, tst)) {
       const k = t[0] + '/' + t[1] + '/' + t[2];
       if (seen.has(k)) continue; seen.add(k); out.push(t);
     }
@@ -350,6 +370,9 @@ function planTiles() {
 
   // 재생을 실제로 한 번 돌려보되 그리지는 않는다. 카메라가 목표를 감속해 따라가므로
   // 목표 지점만 훑으면 그 사이를 지나는 축척들을 통째로 놓친다.
+  // 프레임을 건너뛰며 담으면 그 사이에 카메라가 움직인 만큼 타일이 빈다. 마무리
+  // 줌아웃처럼 화면이 빠르게 넓어지는 구간에서는 그릴 것의 20%가 계획에서 새어 나가,
+  // 받아둔 타일만으로는 지도가 쪼개진 채 확대된다. 한 프레임도 건너뛰지 않는다.
   const FPS = 60, dt = 1 / FPS;   // 실제 재생과 프레임 간격을 맞춰야 궤적이 덜 어긋난다
   const sim = { cx: wide.cx, cy: wide.cy, z: wide.z };
   const to = playTarget();
@@ -357,26 +380,26 @@ function planTiles() {
   const from = { cx: wide.cx, cy: wide.cy,
                  z: Math.max(0.6, Math.min(wide.z, to.z - INTRO.minZoom)) };
   const idur = Math.min(INTRO.maxSec, INTRO.minSec + Math.abs(to.z - from.z) * INTRO.perStop);
-  for (let t = 0; t <= idur; t += dt * 3) {
+  for (let t = 0; t <= idur; t += dt) {
     const u = Math.min(1, t / idur);
     const ep = easeIO(Math.min(1, u / INTRO.panEnd));
-    const ez = easeIO(Math.max(0, (u - INTRO.zoomFrom) / (1 - INTRO.zoomFrom)));
+    const ez = zoomEase((u - INTRO.zoomFrom) / (1 - INTRO.zoomFrom));
     add({ cx: from.cx + (to.cx - from.cx) * ep, cy: from.cy + (to.cy - from.cy) * ep,
           z: from.z + (to.z - from.z) * ez });
   }
   // ② 본 재생 — 프레임 단위로 카메라를 실제와 같은 식으로 굴린다
-  sim.cx = to.cx; sim.cy = to.cy; sim.z = to.z;
+  sim.cx = to.cx; sim.cy = to.cy; sim.z = to.z; restCamera(sim);
   const dur = Math.max(2, opts.duration);
-  let k = 0;
   for (let p = 0; p <= 1; p += dt / dur) {
     stepCamera(sim, p, dt);
-    if ((k++ % 2) === 0) add(sim);        // 두 프레임에 한 번만 담아도 화면이 겹쳐 충분하다
+    add(sim);
   }
-  // ③ 줌아웃 — 마지막 화면에서 전체 경로 화면까지
-  for (let t = 0; t <= 1.8; t += dt * 3) {
-    const u = Math.min(1, t / 1.8), e = easeIO(u);
+  // ③ 줌아웃 — 마지막 화면에서 전체 경로 화면까지 (재생과 같은 길이·같은 곡선으로)
+  const odur = zoomSec(sim.z - wide.z, 1.8);
+  for (let t = 0; t <= odur; t += dt) {
+    const u = Math.min(1, t / odur), e = easeIO(u);
     add({ cx: sim.cx + (wide.cx - sim.cx) * e, cy: sim.cy + (wide.cy - sim.cy) * e,
-          z: sim.z + (wide.z - sim.z) * e });
+          z: sim.z + (wide.z - sim.z) * zoomEase(u) });
   }
   add(wide);
   return out;
@@ -419,10 +442,15 @@ function updateWarmUI() {
  */
 // 자리를 먼저 잡고(panEnd까지) 그 다음에 파고든다(zoomFrom부터).
 // 이동과 확대를 같은 곡선으로 섞으면 중간에 시작 지점이 화면 밖으로 밀려나 빈 화면이 된다.
-// 축척이 목표를 따라가는 속도. 1초 뒤 남는 오차 비율이라고 보면 된다 (작을수록 빠름).
-const CAMZ = { out: 0.012, in: 0.09 };
-const INTRO = { minSec: 1.6, maxSec: 4.0, perStop: 0.26, minZoom: 1.6, panEnd: 0.45, zoomFrom: 0.3 };
+const INTRO = { minSec: 1.6, maxSec: 4.6, perStop: 0.34, minZoom: 1.6, panEnd: 0.45, zoomFrom: 0.3 };
 const easeIO = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+/* 인트로·아웃트로에서 축척을 옮기는 곡선과 시간.
+ * easeIO 로 축척까지 옮기면 가운데 속도가 평균의 2배까지 올라간다. 그 순간 타일 단계가
+ * 우수수 넘어가면서 화면이 쪼개진 채로 확대돼 보인다. 가운데를 일정한 속도로 지나는
+ * cruise 를 쓰고, 옮길 단계 수에 맞춰 시간을 준다 — 재생 중 카메라와 같은 속도감. */
+const ZOOM_EASE = 0.3;
+const zoomEase = u => cruise(Math.max(0, Math.min(1, u)), ZOOM_EASE);
+const zoomSec = (dz, min) => Math.max(min || 1.4, Math.min(4.5, 1.0 + Math.abs(dz) * 0.4));
 function playTarget() {
   const h = headAt(data, sched, 0);
   return opts.camera === 'auto' ? cameraTarget(h) : { cx: h.x, cy: h.y, z: view.z };
@@ -437,6 +465,8 @@ function startIntro() {
   const from = { cx: wide.cx, cy: wide.cy,
                  z: Math.max(0.6, Math.min(wide.z, to.z - INTRO.minZoom)) };
   view.cx = from.cx; view.cy = from.cy; view.z = from.z;
+  restCamera(view);
+  tiles.lvl = undefined;      // 계획도 여기서 시작하므로 타일 단계도 같은 자리에서 잡는다
   intro = { t: 0, from, to,
             dur: Math.min(INTRO.maxSec, INTRO.minSec + Math.abs(to.z - from.z) * INTRO.perStop) };
   // 인트로가 도는 1.6~4초 동안 도착지 타일을 미리 받아둔다
@@ -462,7 +492,9 @@ function applySuggestedDuration() {
   opts.duration = suggestDuration(data.pts.length);
   $('dur').value = opts.duration;
   $('durN').textContent = opts.duration + '초';
+  sched = buildSchedule(data, opts.mode, opts.emph, opts.duration);
   updateDurHint();
+  needsDraw = true;
 }
 
 /* ============================ 리사이즈 ============================ */
@@ -504,10 +536,11 @@ function frame(ts) {
       intro.t += dt;
       const u = Math.min(1, intro.t / intro.dur);
       const ep = easeIO(Math.min(1, u / INTRO.panEnd));
-      const ez = easeIO(Math.max(0, (u - INTRO.zoomFrom) / (1 - INTRO.zoomFrom)));
+      const ez = zoomEase((u - INTRO.zoomFrom) / (1 - INTRO.zoomFrom));
       view.cx = intro.from.cx + (intro.to.cx - intro.from.cx) * ep;
       view.cy = intro.from.cy + (intro.to.cy - intro.from.cy) * ep;
       view.z  = intro.from.z  + (intro.to.z  - intro.from.z)  * ez;
+      restCamera(view);      // 인트로가 끝나면 스프링은 정지 상태에서 이어받는다
       needsDraw = true;
       if (u >= 1) intro = null;
     }
@@ -518,8 +551,9 @@ function frame(ts) {
       $('play').textContent = '▶ 재생';
       // 끝나면 전체 경로가 보일 때까지 줌아웃한 뒤에 녹화를 마친다. 고정 카메라일 땐 그대로 둔다.
       if (opts.camera !== 'fixed') {
-        outro = { t: 0, dur: 1.8, from: { cx: view.cx, cy: view.cy, z: view.z },
-                  to: viewFor(...allBounds(), 0.12) };
+        const wide = viewFor(...allBounds(), 0.12);
+        outro = { t: 0, dur: zoomSec(view.z - wide.z, 1.8),
+                  from: { cx: view.cx, cy: view.cy, z: view.z }, to: wide };
         if (opts.base !== 'none') tiles.prefetch(outro.to, W, H);
       } else if (recording) stopRecording();
     }
@@ -531,10 +565,11 @@ function frame(ts) {
     } else {
       outro.t += dt;
       const u = Math.min(1, outro.t / outro.dur);
-      const e = u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+      const e = easeIO(u);
       view.cx = outro.from.cx + (outro.to.cx - outro.from.cx) * e;
       view.cy = outro.from.cy + (outro.to.cy - outro.from.cy) * e;
-      view.z = outro.from.z + (outro.to.z - outro.from.z) * e;
+      view.z = outro.from.z + (outro.to.z - outro.from.z) * zoomEase(u);
+      restCamera(view);
       needsDraw = true;
       if (u >= 1) { outro = null; if (recording) stopRecording(); }
     }
@@ -852,7 +887,7 @@ function updateBaseNote() {
 }
 $('mode').onchange = e => {
   opts.mode = e.target.value;
-  sched = data ? buildSchedule(data, opts.mode, opts.emph) : null;
+  sched = data ? buildSchedule(data, opts.mode, opts.emph, opts.duration) : null;
   $('emphWrap').style.opacity = opts.mode === 'smooth' ? '1' : '.35';
   $('emph').disabled = opts.mode !== 'smooth';
   needsDraw = true;
@@ -860,7 +895,7 @@ $('mode').onchange = e => {
 $('emph').oninput = e => {
   opts.emph = (+e.target.value) / 100 * 3;
   $('emphN').textContent = e.target.value + '%';
-  sched = data ? buildSchedule(data, opts.mode, opts.emph) : null;
+  sched = data ? buildSchedule(data, opts.mode, opts.emph, opts.duration) : null;
   needsDraw = true;
 };
 $('camera').onchange = e => { opts.camera = e.target.value; intro = null; snapCamera(); needsDraw = true; };
@@ -881,7 +916,10 @@ $('colorReset').onclick = () => {
 $('labels').onchange = e => { opts.labels = e.target.checked; needsDraw = true; };
 $('dur').oninput = e => {
   opts.duration = +e.target.value; $('durN').textContent = e.target.value + '초';
+  // 도착 직후 붙잡아 두는 시간은 초로 잡혀 있다 — 길이가 바뀌면 배분도 다시 해야 한다
+  sched = data ? buildSchedule(data, opts.mode, opts.emph, opts.duration) : null;
   updateDurHint();
+  needsDraw = true;
 };
 $('durAuto').onclick = applySuggestedDuration;
 $('theme').onchange = e => {

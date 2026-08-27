@@ -59,9 +59,9 @@ class TileLayer {
   peek(z, x, y) { const h = this.cache.get(z + '/' + x + '/' + y); return h && h.img.ok ? h.img : null; }
 
   /* 어떤 화면이 어떤 타일을 필요로 하는지만 뽑아낸다 (요청도 그리기도 하지 않는다) */
-  enumerate(view, W, H) {
+  enumerate(view, W, H, st) {
     if (!view) return [];
-    const iz = Math.max(0, Math.min(this.src.max, Math.round(view.z)));
+    const iz = this.level(view.z, st || { lvl: this.lvl });   // st 를 안 주면 지금 상태를 베껴 쓴다
     const n = 1 << iz;
     const scale = 256 * Math.pow(2, view.z - iz);
     const cxp = view.cx * n * scale, cyp = view.cy * n * scale;
@@ -88,12 +88,16 @@ class TileLayer {
   }
 
   /* 화면에 쓸 축척 단계. Math.round 를 그대로 쓰면 view.z 가 경계(x.5)를 오갈 때마다
-     타일 세트가 통째로 바뀌어 화면이 툭툭 튄다. 여유를 둬서 덜 바꾼다. */
-  level(z) {
+     타일 세트가 통째로 바뀌어 화면이 툭툭 튄다. 여유를 둬서 덜 바꾼다.
+     여유를 두는 만큼 '지금 쓰는 단계'는 지나온 축척에 따라 달라진다 — 그래서 상태를
+     밖에서 넘길 수 있게 열어 둔다. 미리 받기 계획이 실제 재생과 같은 단계를 골라야
+     계획에 없던 타일을 화면에서 찾는 일이 없다. */
+  level(z, st) {
+    const s = st || this;
     const want = Math.max(0, Math.min(this.src.max, Math.round(z)));
-    if (this.lvl === undefined || this.lvl > this.src.max) this.lvl = want;
-    if (Math.abs(z - this.lvl) > 0.72) this.lvl = want;
-    return Math.max(0, Math.min(this.src.max, this.lvl));
+    if (s.lvl === undefined || s.lvl > this.src.max) s.lvl = want;
+    if (Math.abs(z - s.lvl) > 0.72) s.lvl = want;
+    return Math.max(0, Math.min(this.src.max, s.lvl));
   }
 
   /* 한 축척 단계를 그린다. exact 일 때만 없는 타일을 상·하위로 메운다. */
@@ -108,9 +112,14 @@ class TileLayer {
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const wx = ((tx % n) + n) % n;
-        const sx = tx * scale - cxp + W / 2, sy = ty * scale - cyp + H / 2;
+        const fx = tx * scale - cxp + W / 2, fy = ty * scale - cyp + H / 2;
+        // 픽셀 격자에 맞춰 그린다. 소수점 자리에 +1 만큼 겹쳐 그리면 확대·축소 중에
+        // 타일 경계마다 실선이 생겼다 사라졌다 하며 지도가 지직거린다.
+        // 양 끝을 같은 규칙으로 반올림하면 옆 타일과 빈틈 없이 딱 맞물린다.
+        const sx = Math.round(fx), sy = Math.round(fy);
+        const sw = Math.round(fx + scale) - sx, sh = Math.round(fy + scale) - sy;
         const img = exact ? this.get(iz, wx, ty) : this.peek(iz, wx, ty);
-        if (img && img.ok) { ctx.drawImage(img, sx, sy, scale + 1, scale + 1); drawn++; continue; }
+        if (img && img.ok) { ctx.drawImage(img, sx, sy, sw, sh); drawn++; continue; }
         if (!exact) continue;                 // 밑그림은 있는 것만 깔고 넘어간다
         missing++;
         // ① 상위(더 축소된) 타일의 해당 사분면으로 임시로 채운다
@@ -120,7 +129,7 @@ class TileLayer {
           const p = this.peek(pz, wx >> up, ty >> up);
           if (!p) continue;
           const f = 1 << up, sub = 256 / f;
-          ctx.drawImage(p, (wx % f) * sub, (ty % f) * sub, sub, sub, sx, sy, scale + 1, scale + 1);
+          ctx.drawImage(p, (wx % f) * sub, (ty % f) * sub, sub, sub, sx, sy, sw, sh);
           filled = true; break;
         }
         // ② 그래도 비면 하위(더 확대된) 타일을 모아 채운다.
@@ -130,7 +139,11 @@ class TileLayer {
           const f = 1 << dn, sub = scale / f;
           for (let j = 0; j < f; j++) for (let i = 0; i < f; i++) {
             const c = this.peek(cz, wx * f + i, ty * f + j);
-            if (c) { ctx.drawImage(c, sx + i * sub, sy + j * sub, sub + 1, sub + 1); filled = true; }
+            if (!c) continue;
+            const gx = Math.round(fx + i * sub), gy = Math.round(fy + j * sub);
+            ctx.drawImage(c, gx, gy, Math.round(fx + (i + 1) * sub) - gx,
+                                     Math.round(fy + (j + 1) * sub) - gy);
+            filled = true;
           }
         }
       }
@@ -143,8 +156,9 @@ class TileLayer {
     if (iz !== this.shown) {                 // 단계가 바뀌면 이전 단계를 잠깐 남겨둔다
       this.prev = this.shown; this.shown = iz; this.fadeAt = performance.now();
     }
+    // 겹침을 선형으로 올리면 시작과 끝에서 한 번씩 눈에 걸린다. 양끝을 눕힌다.
     const fade = this.prev === undefined ? 1
-      : Math.min(1, (performance.now() - this.fadeAt) / TileLayer.FADE_MS);
+      : soft(Math.min(1, (performance.now() - this.fadeAt) / TileLayer.FADE_MS));
     if (fade >= 1) this.prev = undefined;
 
     // ① 두 단계 성긴 밑그림. 축척이 바뀌어도 바탕이 끊기지 않는다. 타일 수는 16분의 1.
@@ -163,6 +177,7 @@ class TileLayer {
 }
 
 TileLayer.FADE_MS = 260;      // 축척 단계를 겹쳐 넘기는 시간
+const soft = u => u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u);
 
 /* ============================ 벡터 배경 ============================ */
 function drawLand(ctx, view, W, H, fill, stroke) {
@@ -189,10 +204,14 @@ function projector(view, W, H) {
   return { s, X: x => (x - view.cx) * s + W / 2, Y: y => (y - view.cy) * s + H / 2 };
 }
 
-function bowedArc(ctx, x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
-  const bow = Math.min(len * 0.18, 160);
-  ctx.quadraticCurveTo((x1 + x2) / 2 - dy / len * bow, (y1 + y2) / 2 + dx / len * bow, x2, y2);
+/* flightArc 가 지도 좌표에서 정해둔 호를 화면에 옮겨 앞에서부터 f 만큼만 그린다.
+ * 끝점을 그때그때 잡아 휘게 하면 머리가 나아갈 때마다 이미 그려둔 궤적이 함께 출렁인다.
+ * 호를 먼저 정하고 앞부분만 잘라 쓰면(2차 베지에 분할) 지나간 자리는 그대로 있는다. */
+function arcTo(ctx, x1, y1, cx, cy, x2, y2, f) {
+  if (f >= 1) { ctx.quadraticCurveTo(cx, cy, x2, y2); return; }
+  const ax = x1 + (cx - x1) * f, ay = y1 + (cy - y1) * f;
+  const bx = cx + (x2 - cx) * f, by = cy + (y2 - cy) * f;
+  ctx.quadraticCurveTo(ax, ay, ax + (bx - ax) * f, ay + (by - ay) * f);
 }
 
 // 카트멀-롬 스플라인. 꺾임을 곡선으로 다듬되 사진 지점은 전부 통과한다.
@@ -256,10 +275,10 @@ function drawRoute(ctx, data, view, W, H, upto, C, opt) {
   for (let i = 0; i <= last; i++) {
     const leg = legs[i];
     if (!leg || leg.kind !== 'flight') continue;
-    const a = pts[leg.i], b = pts[leg.j];
+    const a = pts[leg.i], b = pts[leg.j], q = flightArc(a, b);
     const x1 = X(a.x), y1 = Y(a.y);
-    const bx = i === last ? X(upto.x) : X(b.x), by = i === last ? Y(upto.y) : Y(b.y);
-    ctx.moveTo(x1, y1); bowedArc(ctx, x1, y1, bx, by);
+    ctx.moveTo(x1, y1);
+    arcTo(ctx, x1, y1, X(q.cx), Y(q.cy), X(b.x), Y(b.y), i === last ? upto.f : 1);
   }
   ctx.stroke();
   ctx.setLineDash([]);

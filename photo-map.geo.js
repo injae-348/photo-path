@@ -178,9 +178,102 @@ function prepare(records) {
  * 같은 시간에 지나간다. 그래서 구간마다 가중치를 다르게 줘서 화면 시간을 나눈다.
  * 거리는 로그로 눌러 담는다 — 그대로 비례시키면 비행 하나가 영상의 90%를 먹는다.
  */
-const EASE_KM = 3;          // 이보다 긴 구간은 가감속을 넣는다
+/* 구간을 지나는 속도 곡선. 앞뒤 r 만큼을 가감속에 쓰고 가운데는 일정한 속도로 지난다.
+ * 스무스스텝 계열은 가운데 속도가 1.5~1.9배까지 치솟아, 먼 구간이 '휙' 하고 선 하나로
+ * 지나가 버린다. 순항 구간을 두면 최고 속도가 1/(1-r) 로 묶여 경로가 눈에 남는다. */
+function cruise(f, r) {
+  if (!(r > 0.001)) return f;
+  const V = 1 / (1 - r);
+  const ramp = u => V * (0.5 * u - (r / (2 * Math.PI)) * Math.sin(Math.PI * u / r));
+  if (f <= r) return ramp(f);
+  if (f >= 1 - r) return 1 - ramp(1 - f);
+  return V * (r / 2 + (f - r));
+}
+// 짧은 구간은 거의 직선(사진에서 사진으로), 멀수록 천천히 떠서 천천히 내린다.
+// 거리로 매끄럽게 잇는다 — "몇 km 부터"로 나누면 그 경계에서 움직임이 달라져 튄다.
+const easeRatio = km => 0.36 * km / (km + 20);
 
-function buildSchedule(data, mode, emph) {
+/* ---- 먼 구간 늘려 주기 ----
+ * 먼 구간은 화면에서 가장 많이 움직이는데 시간은 가장 적게 받는다. 그래서 몇 프레임
+ * 만에 선 하나가 그어지고 끝난다. 거리에 따라 시간을 더 얹되, 영상 전체 길이는
+ * 정해져 있으므로 '몇 배를 곱했나'가 아니라 '실제로 몇 배 오래 보이나'로 맞춘다.
+ * 배수 A 를 걸면 총합이 1+(A-1)q 배로 불어나 실제 배수는 A/(1+(A-1)q) 로 줄어든다.
+ * 그래서 q(먼 구간이 지금 차지하는 비중)를 먼저 재고 A 를 거꾸로 푼다. 사진 몇 장짜리
+ * 산책이든 대륙을 넘나드는 여행이든 같은 체감 배수가 나온다.
+ * 이미 먼 구간이 영상을 채우고 있으면 더 내줄 시간이 없으므로 상한에서 멈춘다. */
+const STRETCH = 3.1;        // 먼 구간이 실제로 차지할 시간 배수 (아래 붙잡아 두기에 조금 떼주고 2.5~3배)
+const STRETCH_KM = 150;     // 이 거리쯤에서 배수가 절반 걸린다
+const SHRINK_MIN = 0.45;    // 그 대가로 가까운 구간이 줄어드는 한계
+const ARRIVE_SEC = 1.8;     // 도착 직후 붙잡아 둘 시간 (초) — 카메라가 내려앉는 동안
+const ARRIVE_N = 24;        // 그 시간을 나눠 담을 사진 수
+const ARRIVE_CAP = 0.3;     // 붙잡아 두기가 영상에서 차지할 수 있는 최대 비율
+
+function stretchLong(w, legs) {
+  const n = w.length;
+  const g = new Float64Array(n);
+  let sum = 0, q = 0;
+  for (let i = 0; i < n; i++) {
+    g[i] = legs[i].km / (legs[i].km + STRETCH_KM);
+    sum += w[i]; q += w[i] * g[i];
+  }
+  if (!(sum > 0.000001) || !(q > 0)) return;
+  q /= sum;
+  const den = 1 - STRETCH * q;
+  // 늘린 만큼은 가까운 구간에서 빼 온다. 골목을 지나는 속도가 두 배 넘게 빨라지면
+  // 그건 그것대로 어지러우므로, 되푼 배수를 그 한계에서 한 번 더 자른다.
+  const room = 1 + (1 / SHRINK_MIN - 1) / q;
+  const A = Math.min(room, den > 0.02 ? STRETCH * (1 - q) / den : Infinity);
+  for (let i = 0; i < n; i++) w[i] *= 1 + (A - 1) * g[i];
+}
+
+/* ---- 도착 직후 붙잡아 두기 ----
+ * 먼 길을 온 직후에도 카메라는 아직 축척을 되찾는 중이다. 대륙을 건너오면 십여 단계를
+ * 내려와야 하는데, 그 동안 사진이 우수수 지나가면 화면이 그 동네에 내려앉았을 때
+ * 이미 경로가 다 그려져 있다. 그래서 도착 뒤 몇 장에 걸쳐 시간을 나눠 얹어, 카메라가
+ * 내려앉는 동안 머리가 기어가게 한다.
+ *
+ * 이건 '가중치 몇 배'가 아니라 '몇 초'의 문제다 — 카메라가 내려오는 데 걸리는 시간은
+ * 사진이 몇 장이든 같기 때문이다. 그래서 초 단위로 잡고 가중치로 되푼다.
+ * 배분량 B 를 얹으면 총합이 sum+B 가 되므로, 얹은 몫이 정확히 sec 초가 되려면
+ * B = sec*sum/(dur-sec) 이다. 다 합쳐서 영상의 ARRIVE_CAP 을 넘지 않게 자른다. */
+function arriveHold(w, legs, durSec) {
+  const n = w.length;
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += w[i];
+  const dur = Math.max(2, durSec || 12);
+  if (!(sum > 0)) return;
+
+  const at = [];                                  // [도착 구간 시작, 나눠 담을 장수, 초]
+  let want = 0;
+  for (let i = 0; i < n - 1; i++) {
+    const g = legs[i].km / (legs[i].km + STRETCH_KM);
+    if (g < 0.25) continue;                       // 가까운 구간은 카메라가 곧바로 따라온다
+    // 도착지 주변 몇 장. 곧바로 또 먼 길을 떠나면 거기서 다시 넓어질 테니 그만둔다.
+    let m = 0;
+    while (m < ARRIVE_N && i + 1 + m < n && legs[i + 1 + m].km < legs[i].km * 0.3) m++;
+    if (!m) continue;
+    at.push([i + 1, m, ARRIVE_SEC * g]);
+    want += ARRIVE_SEC * g;
+  }
+  if (!at.length) return;
+  const scale = Math.min(1, dur * ARRIVE_CAP / want);   // 다 넣으면 영상을 다 먹는 경우
+  const total = want * scale;
+  const perSec = sum / (dur - total);                   // 1초에 해당하는 가중치
+  for (const [k0, m, sec] of at) {
+    const each = sec * scale * perSec / m;
+    for (let k = 0; k < m; k++) w[k0 + k] += each;
+  }
+}
+
+/* 비행 구간이 그리는 호. 지도 좌표에서 한 번 정해두고 머리 위치와 그림이 같은 곡선을
+ * 쓴다. 따로 잡으면 머리가 선 옆에 떠서 날아간다. 먼 구간일수록 상대적으로 덜 휜다. */
+function flightArc(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1e-9;
+  const bow = 0.16 * len / (1 + 3 * len);
+  return { cx: (a.x + b.x) / 2 - dy / len * bow, cy: (a.y + b.y) / 2 + dx / len * bow };
+}
+
+function buildSchedule(data, mode, emph, durSec) {
   const n = data.pts.length;
   const acc = new Float64Array(Math.max(1, n));
   if (n < 2) return acc;
@@ -201,6 +294,8 @@ function buildSchedule(data, mode, emph) {
       if (i > 0 && data.legs[i - 1].km > 5 && leg.km < 1) x += 6 * K;
       w[i] = x;
     }
+    stretchLong(w, data.legs);
+    arriveHold(w, data.legs, durSec);
   }
   let s = 0;
   for (let i = 0; i < n - 1; i++) s += w[i];
@@ -225,12 +320,19 @@ function headAt(data, acc, p) {
   const f = span > 0 ? Math.max(0, Math.min(1, (p - acc[i]) / span)) : 0;
   const a = data.pts[i], b = data.pts[i + 1];
   const leg = data.legs[i];
-  // 긴 구간은 스르르 출발해 스르르 도착 — 순간이동처럼 보이지 않게
-  const e = !leg || leg.km <= EASE_KM ? f
-    : leg.km > 300 ? f * f * f * (f * (f * 6 - 15) + 10)   // 대륙 이동은 아주 천천히 떴다 내린다
-    : f * f * (3 - 2 * f);
+  // 스르르 출발해 스르르 도착하되 가운데는 일정한 속도로 — 순간이동처럼 보이지 않게
+  const e = leg ? cruise(f, easeRatio(leg.km)) : f;
+  // 비행은 그림과 같은 호 위를 지나간다 (2차 베지에)
+  let hx, hy;
+  if (leg && leg.kind === 'flight') {
+    const q = flightArc(a, b), u = 1 - e;
+    hx = u * u * a.x + 2 * u * e * q.cx + e * e * b.x;
+    hy = u * u * a.y + 2 * u * e * q.cy + e * e * b.y;
+  } else {
+    hx = a.x + (b.x - a.x) * e; hy = a.y + (b.y - a.y) * e;
+  }
   return {
-    x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e,
+    x: hx, y: hy,
     i, f: e, t: a.t + (b.t - a.t) * e,
     km: data.cum[i] + (leg && leg.kind !== 'gap' ? leg.km * e : 0),
   };
@@ -244,45 +346,75 @@ function headAt(data, acc, p) {
  */
 const CAM = {
   backSec: 1.5,     // 지나온 1.5초치를 화면에 남겨둔다
-  fwdSec: 0.9,      // 다가올 0.9초치를 미리 잡는다 → 비행 직전에 화면이 먼저 넓어진다
-                    // (더 길게 잡으면 출발지에 머무는 내내 화면이 넓어져 버린다)
+  fwdSec: 0.9,      // 다가올 0.9초치를 미리 잡는다
+                    // (더 길게 잡으면 한자리에 머무는 내내 화면이 넓어져 버린다)
+  perLevel: 0.30,   // 창 밖의 점을 놓아줄 때 축척 한 단계에 쓰는 시간 → 초당 3.3단계
+  ramp: 0.5,        // 놓아주기 시작할 때 이만큼에 걸쳐 속도를 붙인다
+  relMax: 14,       // 이 단계까지 줄면 사실상 화면 안이다 — 그만 본다
+  holdFrac: 0.25,   // 비행·공백은 앞의 이만큼만 통째로 보여주고, 남은 동안 도착지로 들어온다
   minBack: 5, minFwd: 2, maxStep: 500,
   maxZ: 18, pad: 0.34,
   boostFrom: 6, boostFull: 10,   // 이 축척 사이에서 확대 배율이 서서히 걸린다
 };
 
+/* 창 밖으로 밀려난(또는 아직 다가오지 않은) 점을 얼마나 놓아줄지 — 단위는 '축척 단계'.
+ * 밀려난 지 o 초일 때 축척이 몇 단계 들어와야 하는가를 돌려준다.
+ * 거리를 선형으로 0 에 붙이면(=가중치를 1→0 으로 내리면) 마지막에 축척이 무한대로
+ * 치솟았다가 잘라내는 순간 툭 튄다. 축척은 거리의 로그이므로, 단계 수를 시간에
+ * 비례시켜야 눈에 보이는 속도가 일정해진다. 시작할 때만 ramp 로 속도를 붙인다. */
+const release = o => o <= 0 ? 0 : (o * o / (o + CAM.ramp)) / CAM.perLevel;
+
+/* 비행·공백(legs[k-1])의 출발지를 놓아주기 시작하는 진행도. 구간의 앞 holdFrac 동안은
+ * 출발지와 도착지를 함께 보여주고, 남은 동안 도착지 축척으로 들어온다.
+ * 착륙한 뒤에도 같은 시계를 이어 쓰므로 착륙하는 순간 축척이 튀지 않는다. */
+const holdUntil = (acc, k) => acc[k - 1] + (acc[k] - acc[k - 1]) * CAM.holdFrac;
+
+/* 점을 창에 넣었다 뺐다 하면 그 한 프레임에 범위가 계단처럼 바뀌고, 축척도 그만큼
+ * 덜컹거린다. 그래서 넣고 빼는 대신 가중치 w(1→0)로 현재 지점 쪽으로 끌어당긴다.
+ * w=1 이면 원래 자리, w=0 이면 범위에 아무 영향이 없다 — 그 사이를 매끄럽게 오가므로
+ * 범위도, 따라서 축척도 매끄럽게 변한다. 비행·공백처럼 따로 손보던 자리도
+ * 같은 규칙 하나로 처리된다. */
 function cameraBounds(data, acc, h, p, durSec) {
   const pts = data.pts, legs = data.legs, n = pts.length;
   let x0 = h.x, x1 = h.x, y0 = h.y, y1 = h.y;
-  const add = q => {
-    if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x;
-    if (q.y < y0) y0 = q.y; if (q.y > y1) y1 = q.y;
+  const add = (q, w) => {
+    if (w <= 0) return;
+    const qx = h.x + (q.x - h.x) * w, qy = h.y + (q.y - h.y) * w;
+    if (qx < x0) x0 = qx; if (qx > x1) x1 = qx;
+    if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
   };
   const d = Math.max(2, durSec || 20);
-  const pMin = p - CAM.backSec / d, pMax = p + CAM.fwdSec / d;
   const i = Math.min(h.i, n - 1);
 
-  // 뒤로: 비행이나 공백을 만나면 즉시 멈춘다.
-  // (안 그러면 착륙한 뒤에도 출발지가 화면에 남아 계속 지구 전체가 보인다)
+  // 뒤로: 지나간 지 오래된 점부터 놓아준다. 한 번에 끊으면 그 프레임에 축척이 통째로
+  // 바뀌어 화면이 크게 튀고, 계속 들고 있으면 지나온 곳이 화면에 계속 남는다.
+  let rel = 0;                                          // 놓아준 정도 (축척 단계, 늘기만 한다)
+  // 비행·공백은 착륙한 뒤가 아니라 '날아가는 동안' 놓아준다. 착륙하고 나서야 줌이
+  // 들어오면 카메라가 도착할 무렵엔 그 동네 경로가 이미 절반쯤 그려져 있다.
+  const cur = legs[i];
+  if (cur && (cur.kind === 'flight' || cur.kind === 'gap'))
+    rel = release((p - holdUntil(acc, i + 1)) * d);
   for (let k = i, cnt = 0; k >= 0 && cnt < CAM.maxStep; k--, cnt++) {
-    add(pts[k]);
+    add(pts[k], Math.pow(2, -rel));
     const leg = k > 0 ? legs[k - 1] : null;
-    if (!leg || leg.kind === 'flight' || leg.kind === 'gap') break;
-    if (cnt >= CAM.minBack && acc[k] < pMin) break;
+    if (!leg) break;
+    rel = Math.max(rel, leg.kind === 'flight' || leg.kind === 'gap'
+      ? release((p - holdUntil(acc, k)) * d)            // 이 구간을 놓아주기 시작한 지 몇 초
+      : release(cnt >= CAM.minBack ? (p - acc[k]) * d - CAM.backSec : 0));
+    if (rel > CAM.relMax) break;
   }
-  // 앞으로: 비행이 창 안에 들어오면 도착지까지 담고 멈춘다.
-  // 단 한 프레임에 통째로 담으면 그 순간 축척이 급히 빠지며 화면이 크게 흔들린다
-  // (산티아고→마드리드 같은 구간에서 눈에 띈다). 비행이 다가올수록 도착지를
-  // 조금씩 끌어당겨, 같은 변화를 앞선 여러 프레임에 나눠 담는다.
+  // 앞으로: 다가올 점을 미리 담아 화면이 먼저 넓어지게 한다. 비행·공백의 도착지는
+  // '출발지에 닿기까지 남은 시간'으로 끌어당기므로, 축척이 빠지는 속도가 뒤와 똑같이 묶인다.
+  // 그 너머도 같은 만큼 더 놓아준 채로 계속 본다 — 도착지에서 끊어 버리면 착륙하는
+  // 순간 다음 비행이 통째로 화면에 들어와 축척이 한 프레임에 빠진다.
+  rel = 0;
   for (let k = i + 1, cnt = 0; k < n && cnt < CAM.maxStep; k++, cnt++) {
     const leg = legs[k - 1];
-    if (!leg || leg.kind === 'flight' || leg.kind === 'gap') {
-      const w = leg ? Math.max(0, Math.min(1, (pMax - acc[k - 1]) * d / CAM.fwdSec)) : 1;
-      add({ x: h.x + (pts[k].x - h.x) * w, y: h.y + (pts[k].y - h.y) * w });
-      break;
-    }
-    add(pts[k]);
-    if (cnt >= CAM.minFwd && acc[k] > pMax) break;
+    if (!leg) break;
+    if (leg.kind === 'flight' || leg.kind === 'gap') rel = Math.max(rel, release((acc[k - 1] - p) * d));
+    add(pts[k], Math.pow(2, -rel));
+    if (cnt >= CAM.minFwd) rel = Math.max(rel, release((acc[k] - p) * d - CAM.fwdSec));
+    if (rel > CAM.relMax) break;
   }
   return [x0, y0, x1, y1];
 }
